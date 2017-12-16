@@ -1,0 +1,6 @@
+.vscode/settings.json
+.vscode/launch.json
+delete-Pod.ps1
+*.log
+pod-3*.json
+pod-4*.json
