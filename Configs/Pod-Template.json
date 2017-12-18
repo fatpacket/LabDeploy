@@ -1,6 +1,7 @@
 {
     "__version": "0.1",
     "__comments": "Configuration for deploy.ps1 - www.fatpacket.net/blog",
+    "pod": "204",
     "target": {
         "server": "vcenter01.fatpacket.home",
         "user": "administrator@vsphere.local",
@@ -16,7 +17,7 @@
             "prefix": "24",
             "dns": "192.168.1.1",
             "domain": "fatpacket.home",
-            "ntp": "192.168.1.1"
+            "ntp": "10.23.0.1"
         }
     },
     "sources": {
@@ -41,8 +42,9 @@
                 "ip": "192.168.204.22"
             }
         ],
-        "cpu": "4",
-        "ram": "12",
+        "cpu": "5",
+        "coresPerSocket": "5",
+        "ram": "16",
         "cacheDisk": "100",
         "capacityDisk": "200",
         "createVMFS": false
@@ -86,12 +88,6 @@
         "syslog": "192.168.1.26",
         "ssh": true,
         "log": "pod-204-deploy.log"
-    },
-    "license": {
-        "vcenter": "XXXXX-XXXXX-XXXXX-XXXXX-XXXXX",
-        "vsphere": "XXXXX-XXXXX-XXXXX-XXXXX-XXXXX",
-        "vsan": "XXXXX-XXXXX-XXXXX-XXXXX-XXXXX",
-        "nsx": "XXXXX-XXXXX-XXXXX-XXXXX-XXXXX"
     },
     "nsx": {
         "name": "pod-204-nsx",

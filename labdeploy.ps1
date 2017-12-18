@@ -13,7 +13,7 @@ param(
 	[switch]$patchESXi
 )
 
-if($psboundparameters.count -eq 1) {
+if($PSBoundParameters.Count -eq 1) {
 	# Only the configFile is passed, set all steps accordingly
 	$deployESXi = $true
 	$deployVCSA = $true
@@ -29,8 +29,8 @@ if($psboundparameters.count -eq 1) {
 }
 
 # Hat tips and thanks go to...
-# Sam McGeown http://www.definit.co.uk && https://github.com/sammcgeown/Pod-Deploy 
-# 
+# Sam McGeown http://www.definit.co.uk && https://github.com/sammcgeown/Pod-Deploy
+#
 # Sam has done some great work over at his blog and these scripts in original form have been a great inspiration for me to work
 # with and tweak. The snippets code in these scripts has also been inspired by the following
 #
@@ -40,23 +40,501 @@ if($psboundparameters.count -eq 1) {
 # Anthony Burke https://networkinferno.net/license-nsx-via-automation-with-powercli
 #
 # Thank you for all the great works and supporting the community the way each of you does
-# 
+#
 # Brant Scalan - http://www.fatpacket.net/blog  && https://github.com/N3tb0ss
 #
 
-# Import the JSON Config File
-$podConfig = (get-content $($configFile) -Raw) | ConvertFrom-Json
 
-$VCSAInstaller  = "$($podConfig.sources.VCSAInstaller)"
-$ESXiAppliance  = "$($podConfig.sources.ESXiAppliance)"
-$NSXAppliance   = "$($podConfig.sources.NSXAppliance)"
-#$vRAAppliance   = "$($podConfig.sources.vRAAppliance)"
-#$ESXi65aBundle	= "$($podConfig.sources.ESXiPatch)"
 
-# Log File
-$verboseLogFile = $podConfig.general.log
+###################################################################################################################
+##                                   Common Cross-Application Functions                                          ##
+###################################################################################################################
 
-$StartTime = Get-Date
+
+function Write-Log {
+	param(
+		[Parameter(Mandatory=$true)]
+		[String]$Message,
+		[switch]$Warning = $false,
+		[switch]$Info = $false
+	)
+
+    $Timestamp = Get-Date -UFormat "%m-%d-%Y %H:%M:%S"
+	Write-Host -NoNewline -ForegroundColor White "[$timestamp]"
+
+    if($Warning){
+		Write-Host -ForegroundColor Yellow " WARNING: $message"
+	} elseif($Info) {
+		Write-Host -ForegroundColor White " $message"
+	}else {
+		Write-Host -ForegroundColor Green " $message"
+	}
+    $logMessage = "[$timeStamp] $message"
+    $logMessage | Out-File -Append -LiteralPath $verboseLogFile
+}
+
+
+function Get-VCSAConnection {
+    param(
+        [string]$vcsaName,
+        [string]$vcsaUser,
+        [string]$vcsaPassword
+    )
+	Write-Log "Getting connection for $($vcsaName)"
+    $existingConnection =  $global:DefaultVIServers | where-object -Property Name -eq -Value $vcsaName
+    if($existingConnection -ne $null) {
+        return $existingConnection
+    } else {
+        $connection = Connect-VIServer -Server $vcsaName -User $vcsaUser -Password $vcsaPassword -WarningAction SilentlyContinue
+        return $connection
+    }
+}
+
+
+function Close-VCSAConnection {
+	param(
+		[string]$vcsaName
+	)
+	if($vcsaName.Length -le 0) {
+		if($Global:DefaultVIServers -le 0) {
+	        Write-Log -Message "Disconnecting from all vCenter Servers"
+			Disconnect-VIServer -Server $Global:DefaultVIServers -Confirm:$false
+		}
+	} else {
+		$existingConnection =  $global:DefaultVIServers | where-object -Property Name -eq -Value $vcsaName
+        if($existingConnection -ne $null) {
+            Write-Log -Message "Disconnecting from $($vcsaName)"
+			Disconnect-VIServer -Server $existingConnection -Confirm:$false;
+        } else {
+            Write-Log -Message "Could not find an existing connection named $($vcsaName)" -Warning
+        }
+	}
+}
+
+
+function ConvertJSONToHash {
+# URL: https://stackoverflow.com/questions/22002748/hashtables-from-convertfrom-json-have-different-type-from-powershells-built-in-h
+param(
+        $root
+    )
+    $hash = @{}
+
+    $keys = $root | Get-Member -MemberType NoteProperty | Select-Object -ExpandProperty Name
+
+    $keys | ForEach-Object {
+        $key=$_
+        $obj=$root.$($_)
+        if($obj -match "@{")
+        {
+            $nesthash=ConvertJSONToHash $obj
+            $hash.add($key,$nesthash)
+        }
+        else
+        {
+           $hash.add($key,$obj)
+        }
+
+    }
+    return $hash
+}
+
+
+function ConvertPSObjectToHashtable {
+# URL: https://stackoverflow.com/questions/22002748/hashtables-from-convertfrom-json-have-different-type-from-powershells-built-in-h
+param (
+        [Parameter(ValueFromPipeline)]
+        $InputObject
+    )
+
+    process
+    {
+        if ($null -eq $InputObject) { return $null }
+
+        if ($InputObject -is [System.Collections.IEnumerable] -and $InputObject -isnot [string])
+        {
+            $collection = @(
+                foreach ($object in $InputObject) { ConvertPSObjectToHashtable $object }
+            )
+
+            Write-Output -NoEnumerate $collection
+        }
+        elseif ($InputObject -is [psobject])
+        {
+            $hash = @{}
+
+            foreach ($property in $InputObject.PSObject.Properties)
+            {
+                $hash[$property.Name] = ConvertPSObjectToHashtable $property.Value
+            }
+
+            $hash
+        }
+        else
+        {
+            $InputObject
+        }
+    }
+}
+
+
+
+
+
+###################################################################################################################
+##                                       Script Specific Functions                                               ##
+###################################################################################################################
+
+Function Install-SoftwareLicense {
+	<#
+    .NOTES
+        ===========================================================================
+        Created by:    Luis Chanu
+        Organization:  On Site Network Solutions, Inc.
+        Twitter:       @LuisChanu
+        ===========================================================================
+    .DESCRIPTION
+        This function installs the software license(s) for a given product into a target Server.
+        It returns:
+                $null if the LicenseFile does not exist
+                Integer equating to the number of matching licenses within LicenseFile
+    .PARAMETER Server
+        The name of Server where the licenses are being installed
+    .PARAMETER Vendor
+        The name of the Vendor whose licenses are being installed
+    .PARAMETER Product
+        The name of the Product whose licenses are being installed.  If not provided, all Vendor's products are matched.
+    .PARAMETER Version
+        The version number for the Products you want to install licenses for
+    .PARAMETER LicenseFile
+        The name of the License File containing the licenses.  If not specified, ".\LicenseData.json" will be used
+    .EXAMPLE
+        Install-SoftwareLicense -Server VIServer -Vendor VMware -Product vCenter
+    .EXAMPLE
+        Install-SoftwareLicense -Server VIServer -Vendor VMware -Product vSphere -LicenseFile "MyLicenseFile.json"
+	#>
+	param(
+        [Parameter(Mandatory=$true)]$Server,
+        [Parameter(Mandatory=$true)][String[]]$Vendor,
+        [String[]]$Product = $null,
+        [String[]]$Version = $null,
+        [String[]]$LicenseFile = ".\LicenseData.json"
+    )
+
+    # Verify LicenseFile exists
+    If (Test-Path -Path $LicenseFile -PathType Leaf) {
+        Write-Log "Using $LicenseFile as license source for $Vendor $Product"
+    }
+    else {
+        Write-Log "Unable to locate LicenseFile $LicenseFile" -Warning
+        return $null
+    }
+
+    # Import JSON LicenseFile
+    $JSONLicenseData = (Get-Content $($LicenseFile) -Raw) | ConvertFrom-Json
+
+    # Convert JSON LicenseData to a usable PowerShell Hash Table
+    $LicenseData  = $JSONLicenseData | ConvertPSObjectToHashTable
+
+
+    ##############################################################
+    ##   Determine which licenses match the criteria provided   ##
+    ##############################################################
+
+    # Document array variable which will hold the licenses that need to be installed.  Elements of the array will be
+    # the License HashTable from the LicenseData data structure.
+    $LicensesToInstall = @()
+
+    # Walk the data structure, looking for matches
+    ForEach ($LicenseVendor in $LicenseData.Keys) {
+        $LicenseProducts = $LicenseData[$LicenseVendor]
+        ForEach ($LicenseProduct in $LicenseProducts.Keys) {
+            ForEach ($License in $LicenseProducts[$LicenseProduct].Licenses) {
+                # Check the various items do not match, continue with next object in ForEach loop
+                If ($LicenseVendor  -ne $Vendor)  { Continue }
+                If ($LicenseProduct -ne $Product) { Continue }
+
+                # If $Version is supplied by user does NOT match, then Continue to next iteration of loop
+                If (($Version -ne $null) -and (-not ($Version -match $LicenseProducts[$LicenseProduct].Version))) {
+                    Continue
+                }
+
+                # If we reach this point, then we have a matching license...so, add it to the $LicensesToInstall array
+                $LicensesToInstall += $License
+            }
+        }
+    }
+
+
+    ##########################################
+    ##   Apply Licenses To Target  Server   ##
+    ##########################################
+
+    # Depending on the platform, perform the appropriate license install procedure
+    switch ($Vendor)
+        {
+            "VMware" {
+                    Write-Log "Licensing $Vendor $Product"
+                    Write-Log "Total of $($LicensesToInstall.Count) licenses found"
+
+                    # Get vCenter Server instance
+                    $serviceInstance   = Get-View ServiceInstance -Server $Server
+                    $licenseManagerRef = $serviceInstance.Content.LicenseManager
+                    $licenseManager    = Get-View $licenseManagerRef
+
+                    # Add each license to License Manager
+                    ForEach ($License in $LicensesToInstall) {
+                        Write-Log "Adding $($License.Quantity) $($License.Measure) license for $Product $($License.Edition)"
+                        $licenseManager.AddLicense($License.KeyCode,$null) |  Out-File -Append -LiteralPath $verboseLogFile
+                    }
+
+					# Do not attempt to match with other Switch blocks
+                    break
+            }
+
+            Default {
+                    Write-Log "Licensing of $Vendor not yet supported.  No $Product licenses installed" -Warning
+            }
+        }
+
+	# Slight Pause to see if that resolves the issue with NSX licenses
+	Start-Sleep 10
+
+	# Return number of Licenses Installed
+    return $LicensesToInstall.Count
+}
+
+
+Function Assign-SoftwareLicense {
+	<#
+    .NOTES
+        ===========================================================================
+        Created by:    Luis Chanu
+        Organization:  On Site Network Solutions, Inc.
+        Twitter:       @LuisChanu
+        ===========================================================================
+    .DESCRIPTION
+		This function queries the Server for an available license from a given Product, and assigns it to the
+		Asset (i.e. vSphere Host, vSAN Cluster, etc.), depending on the type of Product is being licensed.
+        It returns:
+				$null  if an error in assigning a license to the Asset
+				$false if no license was applied because the Asset was already licensed
+				$true  if the Asset was assigned a license
+    .PARAMETER Server
+        The of Server where the licenses are located (VIServer object, NOT the name)
+    .PARAMETER Vendor
+        The name of the Vendor who created the licenses
+    .PARAMETER Product
+        The name of the Product is used to match licenses to assign
+    .PARAMETER Version
+        The Version number for the licenses you want to use
+    .PARAMETER Asset
+        The name of the Asset to which the licenses are being assign.  Asset depends on the Product being licensed.
+    .EXAMPLE
+        Assign-SoftwareLicense -Server VIServer -Vendor VMware -Product vCenter
+    .EXAMPLE
+        Assign-SoftwareLicense -Server VIServer -Vendor VMware -Product vSphere -Asset "10.1.2.3"
+	#>
+	param(
+        [Parameter(Mandatory=$true)]$Server,
+		[Parameter(Mandatory=$true)][String[]]$Vendor,
+        [String[]]$Product = $null,
+        [String[]]$Version = $null,
+		[String[]]$Asset   = $null
+		)
+
+	# Decoded License EditionKey value Hash Table
+	$EditionKeyTable = @{
+		"vCenter" = "vc"	# vc.standard.instance
+		"vSphere" = "esx"	# esx.enterprisePlus.cpuPackage
+		"vSAN"    = "vsan"	# vsan.enterprise2
+		"NSXv"	  = "nsx"	# nsx.vsphere.vm
+	}
+
+	# Depending on the platform, perform the appropriate license install procedure
+	switch ($Vendor)
+		{
+			"VMware" {
+					# Get vCenter Server instance
+					$serviceInstance   = Get-View ServiceInstance -Server $Server
+					$licenseManagerRef = $serviceInstance.Content.LicenseManager
+					$licenseManager    = Get-View $licenseManagerRef
+
+					# Get Licenses installed on License Manager
+					$Licenses = $LicenseManager.Licenses
+
+					# Iterate through each License
+					ForEach ($License in $Licenses) {
+						$LicenseKey  = $License.LicenseKey
+						$LicenseType = $LicenseManager.DecodeLicense($LicenseKey)
+
+						# If License does not match product, then continue to next License
+						If (-not ($LicenseType.EditionKey -match $EditionKeyTable[$Product])) {
+							Continue
+						}
+
+						# If License has no available licenses left, then continue to next License
+						If (($License.Total - $License.Used) -eq 0) {
+							Continue
+						}
+
+						# At this point, License is for the given Product, and is not entirely consumed, so try to assign
+						$licenseAssignmentManager = Get-View $licenseManager.LicenseAssignmentManager
+
+						# Product Specific assignment code below
+						switch($Product)
+							{
+								"vCenter" {
+										# Get the current license, if any, assigned to the vCenter Server
+										$QueriedLicense = $licenseAssignmentManager.QueryAssignedLicenses($Server.InstanceUuid)
+
+										# Check if the License is a vCenter Permanent License
+										If ($QueriedLicense.AssignedLicense.LicenseKey -ne "00000-00000-00000-00000-00000") {
+											# Server already licensed, so exit
+											return $false
+										}
+
+										Write-Log "Assigning vCenter Server License"
+										try {
+											$licenseAssignmentManager.UpdateAssignedLicense($Server.InstanceUuid, $LicenseKey, $null) | Out-File -Append -LiteralPath $verboseLogFile
+										}
+										catch {
+											$ErrorMessage = $_.Exception.Message
+											Write-Log $ErrorMessage -Warning
+										}
+										# License applied, so we don't need to keep going
+										return $true
+								}
+
+								"vSphere" {
+										# Verify vSphere Host information provided, as it's required
+										If ($Asset -eq $null) {
+											Write-Log "Unable to assign vSphere License, as ESXi host information was not provided" -Warning
+
+											# Without ESXi host info, can't do anything, so return from function
+											return $null
+										}
+
+										# If VMHost already has a permanent license, exit
+										If ((Get-VMHost $Asset).LicenseKey -ne "00000-00000-00000-00000-00000") {
+											# VMHost already licensed
+											Write-Log "ESXi host $Asset already licensed"
+
+											# Return from function so that we can check the next Asset
+											return $false
+										}
+
+										# Get number of sockets in the vSphere host
+										$VMHostCPUCount = (Get-VMHost $Asset | Get-View).Hardware.CpuInfo.NumCpuPackages
+
+										# If we do NOT have sufficient capacity, then continue to next license
+										If (($License.Total-$License.Used) -lt $VMHostCPUCount) {
+											Continue
+										}
+
+										# At his point, we have sufficient capcity, so assign the license to the host
+
+										# Save current "ConnectionState"
+										$VMHost = Get-VMHost $Asset
+
+										# If needed, place VMHost into Maintenance Mode
+										If ($VMHost.ConnectionState -ne "Maintenance") {
+											Write-Log "Placing ESXi host $Asset into Maintenance Mode"
+											$VMHost | Set-VMHost -State Maintenance | Out-File -Append -LiteralPath $verboseLogFile
+										}
+
+										# Assign License to VMHost
+										Write-Log "Assigning License Key to ESXi host $Asset"
+										$VMHost | Set-VMHost -LicenseKey $LicenseKey | Out-File -Append -LiteralPath $verboseLogFile
+
+										# Restore VMHost to original ConnectionState
+										Write-Log "Returning ESXi host $Asset to $($VMHost.ConnectionState)"
+										$VMHost | Set-VMHost -State $VMHost.ConnectionState | Out-File -Append -LiteralPath $verboseLogFile
+
+										# License applied, job done, so return from function
+										return $true
+								}
+
+								"vSAN" {
+										# Verify vSAN Cluster information provided, as it's required
+										If ($Asset -eq $null) {
+											Write-Log "Unable to assign vSAN License, as vSAN Cluster information was not provided" -Warning
+
+											# Without vSAN Cluster info, can't do anything, so return from function
+											return $null
+										}
+
+										# See if vSAN Cluster is already licensed by seeing by first getting the Cluster Entity ID (MoRef),
+										# Then query the License Manager to obtain all of the licenses associated with the Entity ID.
+										$ClusterRef = (Get-Cluster -Server $Server -Name $Asset | get-view).MoRef
+										$ClusterLicenses = $licenseAssignmentManager.QueryAssignedLicenses($ClusterRef.value)
+
+										# See if any of the licenses returned are Permanent vSAN Licenses
+										##--> Note: May not need the loop as only 1 license should ever be returned, but QueryAssignedLicense does return an Array.
+										ForEach ($ClusterLicense in $ClusterLicenses) {
+											# If vSAN the license is a vSAN Permanent license, then it's already licensed, so exit
+											If ($ClusterLicense.AssignedLicense.LicenseKey -ne "00000-00000-00000-00000-00000") {
+												# vSAN cluster already licensed, so exit
+												return $false
+											}
+										}
+
+										# At this point, there is no vSAN permanent license assigned to the cluster, so we need to assign one
+
+										# Get the Cluster object so we can see all the hosts in the cluster
+										$Cluster = (Get-Cluster -Server $Server -Name $Asset)
+
+										# Go through all the VMHosts in the cluster, and add up their CPUs
+										$TotalCPUs = 0
+										$Cluster | Get-VMHost | ForEach-Object {$TotalCPUs += $_.NumCpu}
+
+										# If License does NOT have sufficient capacity left, continue to next License
+										If (($License.Total - $License.Used) -lt $TotalCPUs) {
+											Continue
+										}
+
+										# At this point, we have a vSAN license with sufficient capacity, so let's assign it
+										Write-Log "Assigning vSAN License to Cluster $Cluster"
+										try {
+											$licenseAssignmentManager.UpdateAssignedLicense(($ClusterRef.value), $LicenseKey, $null) | Out-File -Append -LiteralPath $verboseLogFile
+										}
+										catch {
+											$ErrorMessage = $_.Exception.Message
+											Write-Log $ErrorMessage -Warning
+										}
+
+										# License Assigned, so exit
+										return $true
+								}
+
+								"NSXv" {
+										Write-Log "Assigning NSX-v License"
+										try {
+											$licenseAssignmentManager.UpdateAssignedLicense("nsx-netsec", $LicenseKey, $null) #----------------------- | Out-File -Append -LiteralPath $verboseLogFile
+										}
+										catch {
+											$ErrorMessage = $_.Exception.Message
+											Write-Log $ErrorMessage -Warning
+										}
+										# License applied, job done, so return from function
+										return $true
+								}
+
+								default {
+										Write-Log "Licensing of $Product not yet supported." -Warning
+										# No license applied
+										return $false
+								}
+							} # Close Product Block
+					} # Close ForEach License
+			} # Close Vendor=VMware
+
+			default {
+				Write-Log "Licensing of $Vendor not yet supported." -Warning
+				# No License applied
+				return $false
+			}
+		} # Close Vendor Block
+}
 
 
 Function Set-VSANSilentHealthChecks {
@@ -98,60 +576,8 @@ Function Set-VSANSilentHealthChecks {
         $vchs.VsanHealthSetVsanClusterSilentChecks($cluster_view,$Test,$null)
     }
 }
-Function Write-Log {
-	param(
-		[Parameter(Mandatory=$true)]
-		[String]$Message,
-		[switch]$Warning,
-		[switch]$Info
-	)
-	$timeStamp = Get-Date -Format "dd-MM-yyyy hh:mm:ss"
-	Write-Host -NoNewline -ForegroundColor White "[$timestamp]"
-	if($Warning){
-		Write-Host -ForegroundColor Yellow " WARNING: $message"
-	} elseif($Info) {
-		Write-Host -ForegroundColor White " $message"
-	}else {
-		Write-Host -ForegroundColor Green " $message"
-	}
-	$logMessage = "[$timeStamp] $message" | Out-File -Append -LiteralPath $verboseLogFile
-}
 
-function Get-VCSAConnection {
-	param(
-		[string]$vcsaName,
-		[string]$vcsaUser,
-		[string]$vcsaPassword
-	)
-	Write-Log "Getting connection for $($vcsaName)"
-	$existingConnection =  $global:DefaultVIServers | where-object -Property Name -eq -Value $vcsaName
-	if($existingConnection -ne $null) {
-		return $existingConnection;
-	} else {
-        $connection = Connect-VIServer -Server $vcsaName -User $vcsaUser -Password $vcsaPassword -WarningAction SilentlyContinue;
-		return $connection;
-	}
-}
 
-function Close-VCSAConnection {
-	param(
-		[string]$vcsaName
-	)
-	if($vcsaName.Length -le 0) {
-		if($Global:DefaultVIServers -le 0) {
-	        Write-Log -Message "Disconnecting from all vCenter Servers"
-			Disconnect-VIServer -Server $Global:DefaultVIServers -Confirm:$false
-		}
-	} else {
-		$existingConnection =  $global:DefaultVIServers | where-object -Property Name -eq -Value $vcsaName
-        if($existingConnection -ne $null) {
-            Write-Log -Message "Disconnecting from $($vcsaName)"
-			Disconnect-VIServer -Server $existingConnection -Confirm:$false;
-        } else {
-            Write-Log -Message "Could not find an existing connection named $($vcsaName)" -Warning
-        }
-	}
-}
 function Get-PodFolder {
 	param(
 		$vcsaConnection,
@@ -170,8 +596,32 @@ function Get-PodFolder {
 	return $parentFolder
 }
 
+
+
+###################################################################################################################
+##                                         Script Begins Here                                                    ##
+###################################################################################################################
+
+
+# Import the JSON Config File
+$podConfig = (get-content $($configFile) -Raw) | ConvertFrom-Json
+
+# Log File
+$DateTime = Get-Date -UFormat "%Y%m%d_%H%M%S"
+$verboseLogFile = ".\Logs\LabDeploy_POD-$($podConfig.Pod)_$DateTime.LOG"
+
+$VCSAInstaller  = "$($podConfig.sources.VCSAInstaller)"
+$ESXiAppliance  = "$($podConfig.sources.ESXiAppliance)"
+$NSXAppliance   = "$($podConfig.sources.NSXAppliance)"
+#$vRAAppliance   = "$($podConfig.sources.vRAAppliance)"
+#$ESXi65aBundle	= "$($podConfig.sources.ESXiPatch)"
+
+# Start the stopwatch
+$StartTime = Get-Date
+
 # Header
 Write-Host -ForegroundColor Magenta "`nFatPacket Labs - Where Rebuilds Happen`n"
+
 
 if($deployESXi) {
 	Write-Log "#### Deploying Nested ESXi VMs ####"
@@ -193,11 +643,12 @@ if($deployESXi) {
 		}
 	}
 
-	$deployTasks = @()
+	# Use .Net System.Collections.ArrayList object over regular Array for additional Remove and Clear methods
+	$deployTasks = New-Object System.Collections.ArrayList
 
 	$podConfig.esxi.hosts | ForEach-Object {
 		Write-Log "Selecting a host from $($podConfig.target.cluster)"
-		$pESXi = $pCluster | Get-VMHost -Server $pVCSA | where { $_.ConnectionState -eq "Connected" } | Get-Random
+		$pESXi = $pCluster | Get-VMHost -Server $pVCSA | Where-Object { $_.ConnectionState -eq "Connected" } | Get-Random
 		Write-Log "$($pESXi) selected."
 
 		$nestedESXiName = $_.name
@@ -205,31 +656,35 @@ if($deployESXi) {
 
 		if((Get-VM | Where-Object -Property Name -eq -Value $nestedESXiName) -eq $null) {
 			$ovfConfig = Get-ovfConfiguration -Ovf $ESXiAppliance
-			$ovfConfig.Common.guestinfo.hostname.Value = $nestedESXiName
-			$ovfConfig.Common.guestinfo.ipaddress.Value = $nestedESXiIPAddress
-			$ovfConfig.Common.guestinfo.netmask.Value = $podConfig.target.network.netmask
-			$ovfConfig.Common.guestinfo.gateway.Value = $podConfig.target.network.gateway
-			$ovfConfig.Common.guestinfo.dns.Value = $podConfig.target.network.dns
-			$ovfConfig.Common.guestinfo.domain.Value = $podConfig.target.network.domain
-			$ovfConfig.Common.guestinfo.ntp.Value = $podConfig.target.network.ntp
-			$ovfConfig.Common.guestinfo.syslog.Value = $podConfig.general.syslog
-			$ovfConfig.Common.guestinfo.password.Value = $podConfig.general.password
-			$ovfConfig.Common.guestinfo.ssh.Value = $podConfig.general.ssh
+			$ovfConfig.Common.guestinfo.hostname.Value   = $nestedESXiName
+			$ovfConfig.Common.guestinfo.ipaddress.Value  = $nestedESXiIPAddress
+			$ovfConfig.Common.guestinfo.netmask.Value    = $podConfig.target.network.netmask
+			$ovfConfig.Common.guestinfo.gateway.Value    = $podConfig.target.network.gateway
+			$ovfConfig.Common.guestinfo.dns.Value        = $podConfig.target.network.dns
+			$ovfConfig.Common.guestinfo.domain.Value     = $podConfig.target.network.domain
+			$ovfConfig.Common.guestinfo.ntp.Value        = $podConfig.target.network.ntp
+			$ovfConfig.Common.guestinfo.syslog.Value     = $podConfig.general.syslog
+			$ovfConfig.Common.guestinfo.password.Value   = $podConfig.general.password
+			$ovfConfig.Common.guestinfo.ssh.Value        = $podConfig.general.ssh
 			$ovfConfig.Common.guestinfo.createvmfs.Value = $podConfig.esxi.createVMFS
-			$ovfConfig.NetworkMapping.VM_Network.Value = $pPortGroup
+			$ovfConfig.NetworkMapping.VM_Network.Value   = $pPortGroup
 
 			Write-Log "Deploying Nested ESXi VM $($nestedESXiName)"
-			#$deployTasks[(Import-VApp -Server $pVCSA -VMHost $pESXi -Source $ESXiAppliance -ovfConfiguration $ovfConfig -Name $nestedESXiName -Location $pCluster -Datastore $pDatastore -DiskStorageFormat thin -RunAsync -ErrorAction SilentlyContinue).Id] = $nestedESXiName
 			$task = Import-VApp -Server $pVCSA -VMHost $pESXi -Source $ESXiAppliance -ovfConfiguration $ovfConfig -Name $nestedESXiName -Location $pCluster -Datastore $pDatastore -InventoryLocation $pFolder -DiskStorageFormat thin -RunAsync -ErrorAction SilentlyContinue
-			$deployTasks += $task
+			$deployTasks.Add($task) | Out-Null
 		} else {
 			Write-Log "Nested ESXi host $($nestedESXiName) exists, skipping" -Warning
 		}
 	}
 
-	$taskCount = $deployTasks.Count
+	# Use .Net System.Collections.ArrayList object over regular Array for additional Remove and Clear methods
+	$RevisedTaskList = New-Object System.Collections.ArrayList
+	$CompletedTasks  = New-Object System.Collections.ArrayList
+	$taskCount       = $deployTasks.Count
+
 	while($taskCount -gt 0) {
 		Write-Log "Task count $($taskCount)"
+		$CompletedTasks.Clear()
 		$deployTasks | ForEach-Object {
 			Write-Log -Message "`t- Task $($_.Id) - $($_.State) - $($_.PercentComplete)%"
 			if($_.State -eq "Success") {
@@ -238,8 +693,8 @@ if($deployESXi) {
 
 				$nestedESXiVM = Get-VM -Name $_.Result -Server $pVCSA
 
-				Write-Log "Updating vCPU Count to $($podConfig.esxi.cpu) & vMEM to $($podConfig.esxi.ram) GB"
-				$nestedESXiVM | Set-VM -NumCpu $podConfig.esxi.cpu -MemoryGB $podConfig.esxi.ram -Confirm:$false | Out-File -Append -LiteralPath $verboseLogFile
+				Write-Log "Updating vCPU Count to $($podConfig.esxi.cpu), Cores Per Socket to $($podConfig.esxi.coresPerSocket), & vMEM to $($podConfig.esxi.ram) GB"
+				$nestedESXiVM | Set-VM -NumCpu $podConfig.esxi.cpu -CoresPerSocket $podConfig.esxi.coresPerSocket -MemoryGB $podConfig.esxi.ram -Confirm:$false | Out-File -Append -LiteralPath $verboseLogFile
 
 				Write-Log "Updating vSAN Caching VMDK size to $($podConfig.esxi.cacheDisk) GB"
 				# Work around for VSAN issue with not enough disk space - delete and add new disk
@@ -255,30 +710,39 @@ if($deployESXi) {
 				New-AdvancedSetting -Entity $nestedESXiVM -Name 'scsi0:0.virtualSSD' -Value $true -Confirm:$false -Force | Out-File -Append -LiteralPath $verboseLogFile
 				New-AdvancedSetting -Entity $nestedESXiVM -Name 'scsi0:1.virtualSSD' -Value $true -Confirm:$false -Force | Out-File -Append -LiteralPath $verboseLogFile
 				New-AdvancedSetting -Entity $nestedESXiVM -Name 'scsi0:2.virtualSSD' -Value $true -Confirm:$false -Force | Out-File -Append -LiteralPath $verboseLogFile
-				
+
 				# Import-vApp now includes -InventoryLocation
 				# Write-Log "Moving $nestedESXiName to $($pFolder.Name) folder"
 				# Move-VM -VM $nestedESXiVM -Destination $pFolder | Out-File -Append -LiteralPath $verboseLogFile
 
-				Write-Log "Powering On $nestedESXiName"
+				Write-Log "Powering On $($_.Result)"
 				Start-VM -VM $nestedESXiVM -Confirm:$false -ErrorAction SilentlyContinue | Out-File -Append -LiteralPath $verboseLogFile
 
-				$successTask = $_
-				$deployTasks = $deployTasks | Where-Object $_.Id -ne ($successTask.Id)
-				$taskCount--
+				# Add this Task to the completed list
+				$CompletedTasks.Add($_) | Out-Null
 
 			} elseif($_.State -eq "Error") {
 				Write-Log -Message " failed to deploy" -Warning
-				$failedTask = $_
-				$deployTasks = $deployTasks | Where-Object $_.Id -ne ($failedTask.Id)
+
+				# Even though it errored out, task is completed, so add it to the completed tasks list
+				$CompletedTasks.Add($_) | Out-Null
+			}
+		}
+		# If we have any CompletedTasks, remove them from the list of all the tasks being deployed
+		If ($CompletedTasks.Count -gt 0) {
+			$RevisedTaskList = $deployTasks
+			$CompletedTasks | ForEach-Object {
+				$RevisedTaskList.Remove($_)
 				$taskCount--
 			}
+			$deployTasks = $RevisedTaskList
 		}
 		Start-Sleep 30
 	}
 	Close-VCSAConnection -vcsaName $podConfig.target.server
 	# Write-Log "#### Nested ESXi VMs Deployed ####"
 }
+
 
 if($deployVCSA) {
 	Write-Log "#### Deploying VCSA ####"
@@ -332,7 +796,7 @@ if($deployVCSA) {
 			Invoke-Expression "$($VCSAInstaller)\vcsa-cli-installer\win32\vcsa-deploy.exe install --no-esx-ssl-verify --accept-eula --acknowledge-ceip $($ENV:Temp)\psctemplate.json" | Out-File -Append -LiteralPath $verboseLogFile
 			$vcsaDeployOutput | Out-File -Append -LiteralPath $verboseLogFile
 			Write-Log "Moving $($podConfig.psc.name) to $($podConfig.target.folder)"
-			if((Get-VM | where {$_.name -eq $podConfig.psc.name}) -eq $null) {
+			if((Get-VM | Where-Object {$_.name -eq $podConfig.psc.name}) -eq $null) {
 				throw "Could not find VCSA VM. The script was unable to find the deployed VCSA"
 			}
 			Get-VM -Name $podConfig.psc.name | Move-VM -InventoryLocation $pFolder |  Out-File -Append -LiteralPath $verboseLogFile
@@ -382,7 +846,7 @@ if($deployVCSA) {
 			Invoke-Expression "$($VCSAInstaller)\vcsa-cli-installer\win32\vcsa-deploy.exe install --no-esx-ssl-verify --accept-eula --acknowledge-ceip $($ENV:Temp)\vctemplate.json" | Out-File -Append -LiteralPath $verboseLogFile
 			$vcsaDeployOutput | Out-File -Append -LiteralPath $verboseLogFile
 			Write-Log "Moving $($podConfig.vcsa.name) to $($podConfig.target.folder)"
-			if((Get-VM | where {$_.name -eq $podConfig.vcsa.name}) -eq $null) {
+			if((Get-VM | Where-Object	 {$_.name -eq $podConfig.vcsa.name}) -eq $null) {
 				throw "Could not find VCSA VM. The script was unable to find the deployed VCSA"
 			}
 			Get-VM -Name $podConfig.vcsa.name | Move-VM -InventoryLocation $pFolder |  Out-File -Append -LiteralPath $verboseLogFile
@@ -418,23 +882,11 @@ if($configureVCSA) {
 	}
 
 	if($licenseVCSA) {
-		Write-Log "Licensing vSphere"
-		$serviceInstance = Get-View ServiceInstance -Server $nVCSA
-		$licenseManagerRef=$serviceInstance.Content.LicenseManager
-		$licenseManager=Get-View $licenseManagerRef
-		$licenseManager.AddLicense($podConfig.license.vcenter,$null) |  Out-File -Append -LiteralPath $verboseLogFile
-		$licenseManager.AddLicense($podConfig.license.vsphere,$null) |  Out-File -Append -LiteralPath $verboseLogFile
-		$licenseManager.AddLicense($podConfig.license.vsan,$null) |  Out-File -Append -LiteralPath $verboseLogFile
-		# $licenseManager.AddLicense($podConfig.license.nsx,$null) |  Out-File -Append -LiteralPath $verboseLogFile
-		$licenseAssignmentManager = Get-View $licenseManager.LicenseAssignmentManager
-		Write-Log "Assigning vCenter Server License"
-		try {
-			$licenseAssignmentManager.UpdateAssignedLicense($nVCSA.InstanceUuid, $podConfig.license.vcenter, $null) | Out-File -Append -LiteralPath $verboseLogFile
-		}
-		catch {
-			$ErrorMessage = $_.Exception.Message
-			Write-Log $ErrorMessage -Warning
-		}
+		Install-SoftwareLicense -Server $nVCSA -Vendor VMware -Product vCenter | Out-Null
+		Install-SoftwareLicense -Server $nVCSA -Vendor VMware -Product vSphere | Out-Null
+		Install-SoftwareLicense -Server $nVCSA -Vendor VMware -Product vSAN    | Out-Null
+
+		Assign-SoftwareLicense  -Server $nVCSA -Vendor VMware -Product vCenter | Out-Null
 	}
 
 	if($configureHosts) {
@@ -444,11 +896,17 @@ if($configureVCSA) {
 			$nestedESXiName = $_.name
 			$nestedESXiIPAddress = $_.ip
 			Write-Log "Adding ESXi host $nestedESXiIPAddress to Cluster"
+
+			# Verify VMHost is not already a member of the Cluster
 			if((Get-VMHost -Server $nVCSA | Where-Object -Property Name -eq -Value $nestedESXiIPAddress) -eq $null) {
-				Add-VMHost -Server $nVCSA -Location $nCluster -User "root" -Password $podConfig.general.password -Name $nestedESXiIPAddress -Force | Set-VMHost -LicenseKey $podConfig.license.vsphere -State "Maintenance" | Out-File -Append -LiteralPath $verboseLogFile
+				# Move VMHost into the vSphere Cluster
+				Add-VMHost -Server $nVCSA -Location $nCluster -User "root" -Password $podConfig.general.password -Name $nestedESXiIPAddress -Force | Out-File -Append -LiteralPath $verboseLogFile
 			} else {
-				Write-Log "Host exists, skipping" -Warning
+				Write-Log "ESXi host exists, skipping" -Warning
 			}
+
+			# Assign License to VMHost
+			Assign-SoftwareLicense -Server $nVCSA -Asset $nestedESXiIPaddress -Vendor VMware -Product vSphere | Out-Null
 		}
 		Write-Log "Exiting host maintenance mode"
 		Get-VMHost -Server $nVCSA | Set-VMHost -State Connected | Out-Null
@@ -469,7 +927,7 @@ if($configureVCSA) {
 
 		Write-Log "Adding hosts to distributed switch"
 		foreach ($nHost in $nHosts) {
-			if(($distributedSwitch | Get-VMHost | where {$_.Name -eq $nHost.Name}) -eq $null) {
+			if(($distributedSwitch | Get-VMHost | Where-Object {$_.Name -eq $nHost.Name}) -eq $null) {
 				Add-VDSwitchVMHost -VDSwitch $distributedSwitch -VMHost $nHost
 				$pause = 20
 			} else {
@@ -491,7 +949,7 @@ if($configureVCSA) {
 		Start-Sleep -Seconds $pause # Pause reduces failures
 
 		foreach($nHost in $nHosts) {
-			if((Get-VMHostNetworkAdapter -DistributedSwitch (Get-VDSwitch -Name $podConfig.vcsa.distributedSwitch ) | where { $_.VMHost.Name -eq $nHost.Name -and $_.DeviceName -eq "vmnic1"}) -eq $NULL) {
+			if((Get-VMHostNetworkAdapter -DistributedSwitch (Get-VDSwitch -Name $podConfig.vcsa.distributedSwitch ) | Where-Object { $_.VMHost.Name -eq $nHost.Name -and $_.DeviceName -eq "vmnic1"}) -eq $NULL) {
 				Write-Log "Adding $($nHost.Name) vmnic1 to distributed switch"
 				Add-VDSwitchPhysicalNetworkAdapter -VMHostNetworkAdapter (Get-VMHostNetworkAdapter -Name "vmnic1" -VMHost $nHost) -DistributedSwitch $distributedSwitch -Confirm:$false
 				$pause = 20
@@ -502,7 +960,7 @@ if($configureVCSA) {
 		}
 		Start-Sleep -Seconds $pause # Pause reduces failures
 
-		foreach($nHost in $nHosts) {			
+		foreach($nHost in $nHosts) {
 			Write-Log "Migrating $($nHost.Name) VMKernel to distributed switch"
 			$VMHNA = Get-VMHostNetworkAdapter -VMHost $nHost -Name vmk0
 			if($VMHNA.PortGroupName -eq $podConfig.vcsa.portgroup) {
@@ -516,7 +974,7 @@ if($configureVCSA) {
 		Start-Sleep -Seconds $pause # Pause reduces failures
 
 		foreach($nHost in $nHosts) {
-			if((Get-VMHostNetworkAdapter -DistributedSwitch (Get-VDSwitch -Name $podConfig.vcsa.distributedSwitch ) | where { $_.VMHost.Name -eq $nHost.Name -and $_.DeviceName -eq "vmnic0"}) -eq $NULL) {
+			if((Get-VMHostNetworkAdapter -DistributedSwitch (Get-VDSwitch -Name $podConfig.vcsa.distributedSwitch ) | Where-Object { $_.VMHost.Name -eq $nHost.Name -and $_.DeviceName -eq "vmnic0"}) -eq $NULL) {
 				Write-Log "Moving $($nHost.Name) vmnic0 to distributed switch"
 				Add-VDSwitchPhysicalNetworkAdapter -VMHostNetworkAdapter (Get-VMHostNetworkAdapter -Name "vmnic0" -VMHost $nHost) -DistributedSwitch $distributedSwitch -Confirm:$false
 				$pause = 20
@@ -528,7 +986,7 @@ if($configureVCSA) {
 		Start-Sleep -Seconds $pause # Pause reduces failures
 
 		foreach($nHost in $nHosts) {
-			if((Get-VMHost $nHost | Get-VMHostNetworkAdapter -VMKernel | Select vmotionenabled) -ne $false) {
+			if((Get-VMHost $nHost | Get-VMHostNetworkAdapter -VMKernel | Select-Object vmotionenabled) -ne $false) {
 				Write-Log "Enabling vMotion on $($nHost.Name) vmk0"
 				Get-VMHost $nHost | Get-VMHostNetworkAdapter -VMkernel -Name "vmk0" | Set-VMHostNetworkAdapter -VmotionEnabled $true -Confirm:$false | Out-File -Append -LiteralPath $verboseLogFile
 				$pause = 20
@@ -551,20 +1009,9 @@ if($configureVCSA) {
 		} else {
 			Set-Cluster -Cluster $podConfig.vcsa.cluster -VsanEnabled:$true -VsanDiskClaimMode Manual -Confirm:$false | Out-File -Append -LiteralPath $verboseLogFile
 			Write-Log "Assigning VSAN License"
-			$serviceInstance = Get-View ServiceInstance -Server $nVCSA
-			$licenseManagerRef=$serviceInstance.Content.LicenseManager
-			$licenseManager=Get-View $licenseManagerRef
-			$licenseAssignmentManager = Get-View $licenseManager.LicenseAssignmentManager
-			$clusterRef = (Get-Cluster -Server $nVCSA -Name $podConfig.vcsa.cluster | get-view).MoRef
-			try {
-				$licenseAssignmentManager.UpdateAssignedLicense(($clusterRef.value), $podConfig.license.vsan, $null) | Out-File -Append -LiteralPath $verboseLogFile
-			}
-			catch {
-				$ErrorMessage = $_.Exception.Message
-				Write-Log $ErrorMessage -Warning
-			}
+			Assign-SoftwareLicense -Server $nVCSA -Vendor VMware -Product vSAN -Asset $podConfig.vcsa.cluster | Out-Null
 		}
-		
+
 		$nHosts = Get-VMHost -Server $nVCSA -Location $podConfig.vcsa.cluster
 		foreach ($nHost in $nHosts) {
 		 	$luns = $nHost | Get-ScsiLun | Select-Object CanonicalName, CapacityGB
@@ -583,7 +1030,7 @@ if($configureVCSA) {
 			} else {
 				Write-Log "VSAN Diskgroup already exists" -Warning
 			}
-		} 
+		}
 		# Diabled VSAN checks specifically for Nest Labs
 		#controllerdiskmode
 		#controllerdriver
@@ -592,7 +1039,7 @@ if($configureVCSA) {
 		#controlleronhcl
 		#perfsvcstatus
 		#hcldbuptodate
-		
+
 		$nCluster = Get-Cluster -Server $nVCSA | Where-object -Property Name -eq -Value $podConfig.vcsa.cluster
 		Write-Log "Clearing VSAN Compatibility Checks - Nested Lab Support Only"
 		Set-VSANSilentHealthChecks -Cluster $nCluster -Test controllerdiskmode,controllerdriver,controllerfirmware,controllerreleasesupport,controlleronhcl,perfsvcstatus,hcldbuptodate -Disable | Out-File -Append -LiteralPath $verboseLogFile
@@ -625,7 +1072,7 @@ if($DeployNSXManager) {
 	$pDatastore = Get-Datastore -Name $podConfig.target.datastore -Server $pVCSA
 	$pPortGroup = Get-VDPortgroup -Name $podConfig.target.portgroup -Server $pVCSA
 	$pFolder = Get-PodFolder -vcsaConnection $pVCSA -folderPath $podConfig.target.folder
-	$pESXi = $pCluster | Get-VMHost -Server $pVCSA | where { $_.ConnectionState -eq "Connected" } | Get-Random
+	$pESXi = $pCluster | Get-VMHost -Server $pVCSA | Where-Object { $_.ConnectionState -eq "Connected" } | Get-Random
 	$NSXhostname = "$($podConfig.nsx.name).$($podConfig.target.network.domain)"
 
 	if((Get-VM -Server $pVCSA | Where-Object -Property Name -eq -Value $podConfig.nsx.name) -eq $null) {
@@ -667,11 +1114,11 @@ if($configureNSX) {
 	Write-Log "#### Configuring NSX Manager ####"
 	$nVCSA = Get-VCSAConnection -vcsaName $podConfig.vcsa.ip -vcsaUser "administrator@$($podConfig.vcsa.sso.domain)" -vcsaPassword $podConfig.vcsa.sso.password
 	$nCluster = Get-Cluster -Server $nVCSA -Name $podConfig.vcsa.cluster
-	
+
 	Write-Log "Connect NSX Manager to vCenter"
 	$NSXServer = Connect-NSXServer -NsxServer $podConfig.nsx.ip -Username admin -Password $podConfig.nsx.password -DisableViAutoConnect -ViWarningAction Ignore -WarningAction SilentlyContinue |  Out-File -Append -LiteralPath $verboseLogFile
 	Set-NsxManager -SyslogServer $podConfig.general.syslog -SyslogPort "514" -SyslogProtocol "UDP" | Out-File -Append -LiteralPath $verboseLogFile
-	
+
 	$NSXVC = Get-NsxManagerVcenterConfig
 	if($NSXVC.Connected -ne $true) {
 		Set-NsxManager -vcenterusername "administrator@$($podConfig.vcsa.sso.domain)" -vcenterpassword $podConfig.vcsa.sso.password -vcenterserver $podConfig.vcsa.ip |  Out-File -Append -LiteralPath $verboseLogFile
@@ -704,19 +1151,12 @@ if($configureNSX) {
 	# Write-Log "Refreshing connection to NSX Manager with SSO credentials"
 	# $NSXServer = Disconnect-NSXServer -NsxServer $podConfig.nsx.ip -Username admin -Password $podConfig.nsx.password -WarningAction SilentlyContinue |  Out-File -Append -LiteralPath $verboseLogFile
 	# $NSXServer = Connect-NSXServer -VCenterServer $podConfig.vcsa.ip -Username "administrator@$($podConfig.vcsa.sso.domain)" -Password $podConfig.vcsa.sso.password -ViWarningAction Ignore -DebugLogging -WarningAction SilentlyContinue |  Out-File -Append -LiteralPath $verboseLogFile
-	
-	Write-Log "Assigning Licensing NSX"
-	$ServiceInstance = Get-View ServiceInstance -Server $nVCSA
-	$LicenseManagerRef = Get-View $ServiceInstance.Content.licenseManager
-	$LicenseAssignmentManager = Get-View $licenseManagerRef.licenseAssignmentManager
-	try {
-		$LicenseAssignmentManager.UpdateAssignedLicense("nsx-netsec",$podConfig.license.nsx,$NULL) | Out-File -Append -LiteralPath $verboseLogFile
-	}
-	catch {
-		$ErrorMessage = $_.Exception.Message
-		Write-Log $ErrorMessage -Warning
-	}
-	
+
+	# Install and Assign NSX License
+	Install-SoftwareLicense -Server $nVCSA -Vendor VMware -Product NSXv | Out-Null
+	Assign-SoftwareLicense  -Server $nVCSA -Vendor VMware -Product NSXv | Out-Null
+
+	# Prepare Controllers
 	if((Get-NsxIpPool -Name "Controllers") -eq $null) {
 		New-NsxIPPool -Name "Controllers" -Gateway $podConfig.target.network.gateway -SubnetPrefixLength $podConfig.target.network.prefix -StartAddress $podConfig.nsx.controller.startIp -EndAddress $podConfig.nsx.controller.endIp -DnsServer1 $podConfig.target.network.dns -DnsSuffix $podConfig.target.network.domain |  Out-File -Append -LiteralPath $verboseLogFile
 	} else {
@@ -728,7 +1168,7 @@ if($configureNSX) {
 		$NSXPortGroup = Get-VDPortGroup -Name $podConfig.vcsa.portgroup -Server $nVCSA
 		$NSXDatastore = Get-Datastore -Name "vsanDatastore" -Server $nVCSA
 		Write-Log "Deploying NSX Controller - this may take a while as the OVF deploys"
-		
+
 		try {
 			$NSXController = New-NsxController -Cluster $nCluster -datastore $NSXDatastore -PortGroup $NSXPortGroup -IpPool $NSXPool -Password $podConfig.nsx.controller.password -Confirm:$false -Wait
 		}
@@ -740,10 +1180,10 @@ if($configureNSX) {
 	}
 
 	Write-Log "## Preparing hosts ##"
-	$clusterStatus = ($nCluster | Get-NsxClusterStatus | select -first 1).installed
+	$clusterStatus = ($nCluster | Get-NsxClusterStatus | Select-Object -first 1).installed
 	if($clusterStatus -eq "false") {
 		Write-Log "Initiating installation of NSX agents"
-		$nCluster | Install-NsxCluster | Out-File -Append -LiteralPath $verboseLogFile
+		$nCluster | Install-NsxCluster -VxlanPrepTimeout 300 | Out-File -Append -LiteralPath $verboseLogFile
 	} else {
 		Write-Log "Cluster is already installed" -Warning
 	}
@@ -761,7 +1201,7 @@ if($configureNSX) {
 		New-NsxVdsContext -VirtualDistributedSwitch $nVDSwitch -Teaming LOADBALANCE_SRCID -Mtu 1600 | Out-File -Append -LiteralPath $verboseLogFile
 	}
 
-	$vxlanStatus =  (Get-NsxClusterStatus $nCluster | where {$_.featureId -eq "com.vmware.vshield.vsm.vxlan" }).status | Out-File -Append -LiteralPath $verboseLogFile
+	$vxlanStatus =  (Get-NsxClusterStatus $nCluster | Where-Object {$_.featureId -eq "com.vmware.vshield.vsm.vxlan" }).status | Out-File -Append -LiteralPath $verboseLogFile
 	if($vxlanStatus -ne "GREEN") {
 		# May need to add -VxlanPrepTimeout to New-NsxClusterVxlanConfig if experience any timeouts on cluster prep
 		$nCluster | New-NsxClusterVxlanConfig -VirtualDistributedSwitch $nVDSwitch -ipPool (Get-NsxIpPool -Name "VTEPs") -VlanId 0 -VtepCount 2 -VxlanPrepTimeout 180 | Out-File -Append -LiteralPath $verboseLogFile
@@ -813,6 +1253,7 @@ $EndTime = Get-Date
 $duration = [math]::Round((New-TimeSpan -Start $StartTime -End $EndTime).TotalMinutes,2)
 
 # Write-Log "Pod Deployment Completed in $($duration) minutes"
+Write-Log "--------------------------------------------------------"
 Write-Log "Pod Deployment Complete!"
 Write-Log "StartTime: $StartTime"
 Write-Log "  EndTime: $EndTime"

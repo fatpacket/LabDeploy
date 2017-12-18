@@ -1,0 +1,1 @@
+This directory is where the various JSON configuration files are placed.

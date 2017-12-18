@@ -1,0 +1,1 @@
+This directory is where the logs are placed when the the script runs.
