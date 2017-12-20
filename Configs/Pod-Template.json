@@ -20,12 +20,35 @@
             "ntp": "10.23.0.1"
         }
     },
-    "sources": {
-        "VCSAInstaller": "E:\\Pod-Deploy-Source\\vSphere\\VMware-VCSA-all-6.5.0-5973321",
-        "ESXiAppliance": "E:\\Pod-Deploy-Source\\ESXi\\Nested_ESXi6.5d_Appliance_Template_v1.0.ova",
-        "NSXAppliance" : "E:\\Pod-Deploy-Source\\NSX\\VMware-NSX-Manager-6.3.0-5007049.ova",
-        "vRAAppliance" : "E:\\Pod-Deploy-Source\\vRA\\VMware-vR-Appliance-7.2.0.381-4660246_OVF10.ova",
-        "ESXiPatch": "E:\\Pod-Deploy-Source\\ESXi\\ESXi650-201701001\\vmw-ESXi-6.5.0-metadata.zip"
+    "Software": {
+        "VCSA": {
+            "Vendor":  "VMware",
+            "Product": "vCenter",
+            "Version": "6.50U1C",
+            "MatchVersionUsingRegEx": false,
+            "Patch":   false
+        },
+        "ESXi": {
+            "Vendor":  "VMware",
+            "Product": "ESXi",
+            "Version": "6.50U1",
+            "MatchVersionUsingRegEx": false,
+            "Patch":   false
+        },
+        "NSXv": {
+            "Vendor":  "VMware",
+            "Product": "NSX-v",
+            "Version": "6.3.5",
+            "MatchVersionUsingRegEx": false,
+            "Patch":   false
+        },
+        "vRA": {
+            "Vendor":  "VMware",
+            "Product": "vRA",
+            "Version": "7.3.0",
+            "MatchVersionUsingRegEx": false,
+            "Patch":   false
+        }
     },
     "esxi": {
         "hosts": [

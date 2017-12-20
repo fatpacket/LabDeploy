@@ -597,11 +597,274 @@ function Get-PodFolder {
 }
 
 
+function Get-SoftwarePath {
+    <#
+    .NOTES
+        ===========================================================================
+        Created by:    Luis Chanu
+        Organization:  On Site Network Solutions, Inc.
+        Twitter:       @LuisChanu
+        ===========================================================================
+    .DESCRIPTION
+        This function returns the path to the software installtion option or patch matching the supplied matching
+		critera.  If ExactVersion is set (default), then the software version must exactly match, else a partial
+		match is performed.
+        It returns:
+                exit if Software repository file cannot be found
+                $null if there are no matching options.
+                Path of the matching software installation option, or the patch, depending on what is requested.
+    .PARAMETER Vendor
+        The name of the software Vendor.  This field is required.  If there is no match, the application exits.
+    .PARAMETER Product
+        The name of the Software Product.  This field is required.  If there is no match, the application exists.
+    .PARAMETER Version
+		The version number for the software Product you want to install.  If the Version field is not 
+		provided (i.e. set to $null), then a menu is displaying all versions of the given Vendor's Software
+		product.
+    .PARAMETER Patch
+        If this optional switch is set, then it returns not an installation option, but a patch
+    .PARAMETER MatchVersionUsingRegEx
+		When set to $true, if a Version number is provided, it will be  matched to the software options using
+		Regular Expressions.  This allows regular expressions to be placed within the configuration
+		files, if so desired.
+    .PARAMETER File
+        Name of the File containing all of the the software products which can be installed.  If not
+        specified, ".\Software.json" will be used
+    .EXAMPLE
+        Get-SoftwarePath -Vendor "VMware" -Product "vCenter" -Version "6.5.0U1C"
+    .EXAMPLE
+        Get-SoftwarePath -Vendor "VMware" -Product "ESXi" -Version "6.5.0U1"
+    .EXAMPLE
+        Get-SoftwarePath -Vendor "VMware" -Product "ESXi" -Version "ESXi650-201710001" -Patch
+    .EXAMPLE
+        Get-SoftwarePath -Vendor "VMware" -Product "ESXi" -File ".\MySoftwareList.json"
+	#>
+    param(
+        [Parameter(Mandatory=$true)][String]$Vendor,
+        [Parameter(Mandatory=$true)][String]$Product,
+        [switch]$Patch    			  = $false,
+		[bool]$MatchVersionUsingRegEx = $false,
+		[String]$Version 			  = $null,
+        [String]$File     			  = ".\Software.JSON"
+    )
+
+    # Verify Software File exists
+    If (Test-Path -Path $File -PathType Leaf) {
+        Write-Log "Using $File as software repsotory configuration file for $Vendor $Product"
+    }
+    else {
+        Write-Log "Unable to locate Software Repository configuration file $File... Exiting." -Warning
+        exit
+    }
+
+    # Import JSON Software Repository Information
+    $JSONSoftware = (Get-Content $($File) -Raw) | ConvertFrom-Json
+
+    # Convert JSON Software Repository Data to a usable PowerShell Hash Table
+    $Software  = $JSONSoftware | ConvertPSObjectToHashTable
+
+    #################################################################
+    ##   Determine if any software matches the criteria provided   ##
+    #################################################################
+
+	# If either Vendor or Product is $null, return $null, send warning and return as we would never have a match
+	If (($Vendor -eq $null) -or ($Product -eq $null)) {
+		Write-Log "Unable to search Software repository, as either Vendor or Product was not provided as required." -Warning
+		return $null
+	}
+
+    # Document array variable which will hold the matching software options.  Elements of the array will be
+    # the Software HashTable from the Software repository data structure.
+    $MatchingOptions = @()
+
+    # Walk through each of the vendors in the software repository
+    ForEach ($SoftwareVendor in $Software.Keys) {
+        # If this vendor is not the vendor we're looking for, keep looking
+        If ($SoftwareVendor  -ne $Vendor)  { Continue }
+
+        # Walk through each of the products for the vendor
+        $SoftwareProducts = $Software[$SoftwareVendor]
+        ForEach ($SoftwareProduct in $SoftwareProducts.Keys) {
+            # If this software product is not the product we're looking for, keep looking
+            If ($SoftwareProduct -ne $Product) { Continue }
+
+            # Check to see if the user wants to check for patches or software installers, as that
+            # will drive what options we check.
+            If ($Patch -eq $true) {
+                $Options = $SoftwareProducts[$SoftwareProduct].Patches
+            }
+            else {
+                $Options = $SoftwareProducts[$SoftwareProduct].Installers
+            }
+
+            # Walk through each of the Installation Options that exist for this product
+            ForEach ($Option in $Options) {
+
+				# If no Version provided by the user, match all versions
+				If (($Version -eq $null) -or ($Version -eq "")) {
+					$MatchingOptions += $Option
+					Continue
+				}
+
+				# If we are matching using Regular Expressions, use Match to see if RegEx match
+				If ($MatchVersionUsingRegEx -eq $true) {
+					# If we do not match against RegEx, get next Option to check
+					If ($Option.Version -notmatch $Version) {
+						Continue
+					}
+				}
+				# Since we're not using RegEx, if we don't match EXACTLY, get next Option to check
+				elseif ($Option.Version -ne $Version) {
+					Continue
+				}
+
+	            # If we reach this point, then we have a matching software option...so, add it to the array
+    	        $MatchingOptions += $Option
+            }
+        }
+    }
+
+    ############################################################
+    #   At this point, we have all of the matching options.   ##
+    ############################################################
+
+    # If we have 0 matching options, return $null
+    If ($MatchingOptions.Count -eq 0) {
+        Write-Log "No matching software options for $Vendor $Product $Version" -Warning
+        return $null
+    }
+
+    # If only one (1) object matched, that's the SelectedOption
+    If ($MatchingOptions.Count -eq 1) {
+        $SelectedOption = $MatchingOptions[0]
+    }
+    else {
+        $Splat = @{
+            DialogBoxTitle  = "$Vendor $Product Options"
+            DialogBoxPrompt = "Please select one of the versions below:"
+            ItemList        = $MatchingOptions
+        }
+        Write-Log "Multiple software options for $Vendor $Product.  Prompting user to select one."
+        $SelectedOption = Select-ItemFromList @Splat
+    }
+
+    ####################################################################
+    #   At this point, it should be narrowed down to 0 or 1 objects   ##
+    ####################################################################
+
+    # If user did not select any options (i.e. Cancelled), return $null
+    If ($SelectedOption -eq $null) {
+        Write-Log "User did not select an option for $Vendor $Product." -Warning
+        return $null
+    }
+
+    # If Selected Option does not include a file, return the directory
+    If ($SelectedOption.File -eq $null) {
+        $FullPath = $SelectedOption.Directory
+    }
+    else {
+        $FullPath = "$($SelectedOption.Directory)\$($SelectedOption.File)"
+    }
+
+    # Return location of requested softare product
+    Write-Log "$Vendor $Product $Version is located at $FullPath"
+    return $FullPath
+}
+
+
+function Select-ItemFromList {
+    param(
+        [Parameter(Mandatory=$True)]
+        [String]$DialogBoxTitle,
+        [Parameter(Mandatory=$True)]
+        [String]$DialogBoxPrompt,
+        [Parameter(Mandatory=$True)]
+        [Array]$ItemList
+    )
+
+    # Working Script:   https://docs.microsoft.com/en-us/powershell/scripting/getting-started/cookbooks/selecting-items-from-a-list-box?view=powershell-5.1
+
+    Add-Type -AssemblyName System.Windows.Forms
+    Add-Type -AssemblyName System.Drawing
+
+    $form = New-Object System.Windows.Forms.Form
+    $form.Text = $DialogBoxTitle
+    $form.Size = New-Object System.Drawing.Size(300,200)
+    $form.StartPosition = "CenterScreen"
+
+    $OKButton = New-Object System.Windows.Forms.Button
+    $OKButton.Location = New-Object System.Drawing.Point(75,120)
+    $OKButton.Size = New-Object System.Drawing.Size(75,23)
+    $OKButton.Text = "OK"
+    $OKButton.DialogResult = [System.Windows.Forms.DialogResult]::OK
+    $form.AcceptButton = $OKButton
+    $form.Controls.Add($OKButton)
+
+    $CancelButton = New-Object System.Windows.Forms.Button
+    $CancelButton.Location = New-Object System.Drawing.Point(150,120)
+    $CancelButton.Size = New-Object System.Drawing.Size(75,23)
+    $CancelButton.Text = "Cancel"
+    $CancelButton.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
+    $form.CancelButton = $CancelButton
+    $form.Controls.Add($CancelButton)
+
+    $label = New-Object System.Windows.Forms.Label
+    $label.Location = New-Object System.Drawing.Point(10,20)
+    $label.Size = New-Object System.Drawing.Size(280,20)
+    $label.Text = $DialogBoxPrompt
+    $form.Controls.Add($label)
+
+    $ListBox = New-Object System.Windows.Forms.ListBox
+    $ListBox.Location = New-Object System.Drawing.Point(10,40)
+    $ListBox.Size = New-Object System.Drawing.Size(260,20)
+    $ListBox.Height = 80
+
+    # Sort the ListBox entries so the item list displays in order
+    $ListBox.Sorted = $true
+
+    # Add the various choices to choose from to the Listbox
+    $ItemList.GetEnumerator() | ForEach-Object {
+        [void] $ListBox.Items.Add($_.Name)
+    }
+
+    $form.Controls.Add($ListBox)
+
+    $form.Topmost = $True
+
+    $result = $form.ShowDialog()
+
+    # If user pressed OK, see what they selected
+    if ($result -eq [System.Windows.Forms.DialogResult]::OK)
+    {
+        $Selection = $ListBox.SelectedItem
+
+        # Iterate through the ItemList to see which item the user selected, and return it
+        $ItemList.GetEnumerator() | ForEach-Object {
+            if ($_.Name -eq $Selection)
+            {
+                return $_
+            }
+        }
+    }
+    else
+    {
+        # If OK wasn't selected, then return Null
+        $Selection = $null
+    }
+}
+
+
+
+
+
+
 
 ###################################################################################################################
-##                                         Script Begins Here                                                    ##
+##                                      Script Begins Execution Here                                             ##
 ###################################################################################################################
 
+# Start the stopwatch
+$StartTime = Get-Date
 
 # Import the JSON Config File
 $podConfig = (get-content $($configFile) -Raw) | ConvertFrom-Json
@@ -610,18 +873,97 @@ $podConfig = (get-content $($configFile) -Raw) | ConvertFrom-Json
 $DateTime = Get-Date -UFormat "%Y%m%d_%H%M%S"
 $verboseLogFile = ".\Logs\LabDeploy_POD-$($podConfig.Pod)_$DateTime.LOG"
 
+# Header
+Write-Host -ForegroundColor Magenta "`nFatPacket Labs - Where Rebuilds Happen`n"
+
+
+#########################################################
+##  Obtain Paths To Software Versions Being Installed  ##
+#########################################################
+
+# Verify VCSA was defined in the configuration file
+If ([bool]$podConfig.Software.VCSA) {
+	$VCSAInstaller = Get-SoftwarePath -Vendor $podConfig.Software.VCSA.Vendor  -Product $podConfig.Software.VCSA.Product -Version $podConfig.Software.VCSA.Version -MatchVersionUsingRegEx $podConfig.Software.VCSA.MatchVersionUsingRegEx
+
+	# If no match was found for the software, create a warning message
+	If ($VCSAInstaller -eq $null) {
+		Write-Log "No matching entry found in the Software repository for VCSA" -Warning
+	}
+}
+else {
+	# Software entry not defined in configuration file
+	Write-Log "Configuration file does not contain entry for Sofware.VCSA" -Info
+}
+
+
+# Verify ESXi was defined in the configuration file
+If ([bool]$podConfig.Software.ESXi) {
+	# Check to see if the entry is for patches
+	If ($podConfig.Software.ESXi.Patch -eq $true) {
+		$ESXi65aBundle = Get-SoftwarePath -Vendor $podConfig.Software.ESXi.Vendor -Product $podConfig.Software.ESXi.Product -Version $podConfig.Software.ESXi.Version -MatchVersionUsingRegEx $podConfig.Software.ESXi.MatchVersionUsingRegEx -Patch
+	}
+	else {
+		# We're installing, and not patching, so set ESXi patching variable to $null
+		$ESXi65aBundle = $null
+
+		# Get path to the installer
+		$ESXiAppliance = Get-SoftwarePath -Vendor $podConfig.Software.ESXi.Vendor  -Product $podConfig.Software.ESXi.Product -Version $podConfig.Software.ESXi.Version -MatchVersionUsingRegEx $podConfig.Software.ESXi.MatchVersionUsingRegEx
+
+		# If no match was found for the software, create a warning message
+		If ($ESXiAppliance -eq $null) {
+			Write-Log "No matching entry found in the Software repository for ESXi" -Warning
+		}
+	}
+}
+else {
+	# Software entry not defined in configuration file
+	Write-Log "Configuration file does not contain entry for Sofware.ESXi" -Info
+}
+
+
+# Verify NSXv was defined in the configuration file
+If ([bool]$podConfig.Software.NSXv) {
+	$NSXAppliance = Get-SoftwarePath -Vendor $podConfig.Software.NSXv.Vendor -Product $podConfig.Software.NSXv.Product -Version $podConfig.Software.NSXv.Version -MatchVersionUsingRegEx $podConfig.Software.NSXv.MatchVersionUsingRegEx
+
+	# If no match was found for the software, create a warning message
+	If ($NSXAppliance -eq $null) {
+		Write-Log "No matching entry found in the Software repository for NSXv" -Warning
+	}
+}
+else {
+	# Software entry not defined in configuration file
+	Write-Log "Configuration file does not contain entry for Sofware.NSXv" -Info
+}
+
+
+# Verify vRA was defined in the configuration file
+If ([bool]$podConfig.Software.vRA) {
+	$vRAAppliance = Get-SoftwarePath -Vendor $podConfig.Software.vRA.Vendor -Product $podConfig.Software.vRA.Product -Version $podConfig.Software.vRA.Version -MatchVersionUsingRegEx $podConfig.Software.vRA.MatchVersionUsingRegEx
+
+	# If no match was found for the software, create a warning message
+	If ($vRAAppliance -eq $null) {
+		Write-Log "No matching entry found in the Software repository for vRA" -Warning
+	}
+}
+else {
+	# Software entry not defined in configuration file
+	Write-Log "Configuration file does not contain entry for Sofware.vRA" -Info
+}
+
+
+
+<#-------------Previous config -- can delete once new code is working
 $VCSAInstaller  = "$($podConfig.sources.VCSAInstaller)"
 $ESXiAppliance  = "$($podConfig.sources.ESXiAppliance)"
 $NSXAppliance   = "$($podConfig.sources.NSXAppliance)"
 #$vRAAppliance   = "$($podConfig.sources.vRAAppliance)"
 #$ESXi65aBundle	= "$($podConfig.sources.ESXiPatch)"
+#>
 
-# Start the stopwatch
-$StartTime = Get-Date
 
-# Header
-Write-Host -ForegroundColor Magenta "`nFatPacket Labs - Where Rebuilds Happen`n"
-
+#################################################
+##   Script "Heavy Lifting" Work Begins Here   ##
+#################################################
 
 if($deployESXi) {
 	Write-Log "#### Deploying Nested ESXi VMs ####"
@@ -1079,7 +1421,7 @@ if($DeployNSXManager) {
 		Write-Log "Deploying NSX Manager"
 		#splat all the parameters
 		$nsxManagerBuildParams = @{
-			NsxManagerOVF           = $podConfig.sources.NSXAppliance
+			NsxManagerOVF           = $NSXAppliance
 			Name                    = $podConfig.nsx.name
 			ClusterName             = $pCluster
 			ManagementPortGroupName = $pPortGroup
