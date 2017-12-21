@@ -246,13 +246,15 @@ Function Install-SoftwareLicense {
 
     # Walk the data structure, looking for matches
     ForEach ($LicenseVendor in $LicenseData.Keys) {
-        $LicenseProducts = $LicenseData[$LicenseVendor]
-        ForEach ($LicenseProduct in $LicenseProducts.Keys) {
-            ForEach ($License in $LicenseProducts[$LicenseProduct].Licenses) {
-                # Check the various items do not match, continue with next object in ForEach loop
-                If ($LicenseVendor  -ne $Vendor)  { Continue }
-                If ($LicenseProduct -ne $Product) { Continue }
+		# If Vendor doesn't match, no bother checking its licenses...go on to next vendor
+		If ($LicenseVendor  -ne $Vendor)  { Continue }
+		$LicenseProducts = $LicenseData[$LicenseVendor]
 
+		ForEach ($LicenseProduct in $LicenseProducts.Keys) {
+			# If Prodocut doesn't match, no bother checking its licenses...go on to next product
+			If ($LicenseProduct -ne $Product) { Continue }
+
+			ForEach ($License in $LicenseProducts[$LicenseProduct].Licenses) {
                 # If $Version is supplied by user does NOT match, then Continue to next iteration of loop
                 If (($Version -ne $null) -and (-not ($Version -match $LicenseProducts[$LicenseProduct].Version))) {
                     Continue
@@ -265,16 +267,16 @@ Function Install-SoftwareLicense {
     }
 
 
-    ##########################################
-    ##   Apply Licenses To Target  Server   ##
-    ##########################################
+    #########################################
+    ##  Install Licenses To Target Server  ##
+    #########################################
 
     # Depending on the platform, perform the appropriate license install procedure
     switch ($Vendor)
         {
             "VMware" {
                     Write-Log "Licensing $Vendor $Product"
-                    Write-Log "Total of $($LicensesToInstall.Count) licenses found"
+                    Write-Log "Total of $($LicensesToInstall.Count) license(s) found"
 
                     # Get vCenter Server instance
                     $serviceInstance   = Get-View ServiceInstance -Server $Server
@@ -283,7 +285,7 @@ Function Install-SoftwareLicense {
 
                     # Add each license to License Manager
                     ForEach ($License in $LicensesToInstall) {
-                        Write-Log "Adding $($License.Quantity) $($License.Measure) license for $Product $($License.Edition)"
+						Write-Log "Adding $($License.Quantity) $($License.Measure) license for $Product $($License.Edition)"
                         $licenseManager.AddLicense($License.KeyCode,$null) |  Out-File -Append -LiteralPath $verboseLogFile
                     }
 
@@ -768,7 +770,20 @@ function Get-SoftwarePath {
 
     # Return location of requested softare product
     Write-Log "$Vendor $Product $Version is located at $FullPath"
-    return $FullPath
+
+    # If FullPath (which can be either a directory or file) does not exist, warn user
+    If (-not (Test-Path -Path $FullPath)) {
+		# If Selection is a Directory
+		If ($SelectedOption.File -eq $null) {
+			Write-Log "$Vendor $Product $Version installation directory $FullPath does not exist." -Warning
+		}
+		# ...Otherwise, Selection path ends with a file
+		else {
+			Write-Log "$Vendor $Product $Version installation file $FullPath does not exist." -Warning
+		}
+    }
+
+	return $FullPath
 }
 
 

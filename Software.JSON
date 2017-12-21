@@ -248,7 +248,7 @@
                     "Version":      "6.3.5",
                     "Name":         "NSX for vSphere v6.3.5",
                     "Directory":    "E:\\Software\\VMware\\NSX-v\\v6.3.5",
-                    "File":         "VMware-NSX-Manager-6.3.5-7119875.ova.ova"
+                    "File":         "VMware-NSX-Manager-6.3.5-7119875.ova"
                 }
             ],
             "Patches": [
