@@ -608,10 +608,8 @@ function Get-SoftwarePath {
         Twitter:       @LuisChanu
         ===========================================================================
     .DESCRIPTION
-        This function returns the path to the software installtion option or patch matching the supplied matching
-		critera.  If ExactVersion is set (default), then the software version must exactly match, else a partial
-		match is performed.
-        It returns:
+        This function returns the path to the software installtion option or patch for the supplied matching critera.
+		It returns:
                 exit if Software repository file cannot be found
                 $null if there are no matching options.
                 Path of the matching software installation option, or the patch, depending on what is requested.
@@ -620,7 +618,7 @@ function Get-SoftwarePath {
     .PARAMETER Product
         The name of the Software Product.  This field is required.  If there is no match, the application exists.
     .PARAMETER Version
-		The version number for the software Product you want to install.  If the Version field is not 
+		The version number for the software Product you want to install.  If the Version field is not
 		provided (i.e. set to $null), then a menu is displaying all versions of the given Vendor's Software
 		product.
     .PARAMETER Patch
