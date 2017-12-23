@@ -1,0 +1,507 @@
+{
+    "__version": "0.2",
+    "__Revised": "Last revised by Luis Chanu on 12/22/2017 at 8:03pm",
+    "__Comment1": "Configuration file for LabDeploy.ps1 www.fatpacket.net/blog.",
+    "__Comment2": "Keys below which start with double underscore (__) are comments/information for the item named after the underscores",
+    "pod": "200",
+    "__Target": "__Items listed under Target are in the physical, or 'Outter', part of the environment.",
+    "target": {
+        "server": "vcenter01.fatpacket.home",
+        "user": "administrator@vsphere.local",
+        "password": "VMware1!",
+        "datacenter": "Lab",
+        "cluster": "Workload",
+        "datastore": "vsanDatastore",
+        "folder": "Nested Labs/Pod200",
+        "__portgroup": "__If multiple PortGroups are created in the Nested environment, this PortGroup will need to support Virtual Group Tagging (VGT)__",
+        "portgroup": "200-Pod-200-Nested"
+    },
+    "Common": {
+        "password": "VMware1!",
+        "syslog": "10.23.100.26",
+        "domain": "fatpacket.home",
+        "dns": "10.23.100.254",
+        "ntp": "10.23.0.1",
+        "ssh": true
+    },
+    "Software": {
+        "VCSA": {
+            "Vendor":  "VMware",
+            "Product": "vCenter",
+            "Version": "6.50U1C",
+            "MatchVersionUsingRegEx": false,
+            "Patch":   false
+        },
+        "ESXi": {
+            "Vendor":  "VMware",
+            "Product": "ESXi",
+            "Version": "6.50U1",
+            "MatchVersionUsingRegEx": false,
+            "Patch":   false
+        },
+        "NSXv": {
+            "Vendor":  "VMware",
+            "Product": "NSX-v",
+            "Version": "6.3.5",
+            "MatchVersionUsingRegEx": false,
+            "Patch":   false
+        },
+        "vRA": {
+            "Vendor":  "VMware",
+            "Product": "vRA",
+            "Version": "7.3.0",
+            "MatchVersionUsingRegEx": false,
+            "Patch":   false
+        }
+    },
+    "esxi": {
+        "__HardwareSettings": "__Defines per cluster nested ESXi host hardware configuration",
+        "HardwareSettings": {
+            "Management": {
+                "cpu": "5",
+                "coresPerSocket": "5",
+                "ram": "20",
+                "cacheDisk": "100",
+                "capacityDisk": "200",
+                "createVMFS": false
+            },
+            "Compute": {
+                "cpu": "4",
+                "coresPerSocket": "4",
+                "ram": "16",
+                "cacheDisk": "100",
+                "capacityDisk": "200",
+                "createVMFS": false
+            },
+            "Edge": {
+                "cpu": "4",
+                "coresPerSocket": "4",
+                "ram": "16",
+                "cacheDisk": "50",
+                "capacityDisk": "100",
+                "createVMFS": false
+            }
+        },
+        "hosts": {
+            "Pod-200-ESXi-1" : {
+                "cluster" : "Management",
+                "vmks": {
+                    "vmk0": {
+                        "portgroup": "Management",
+                        "MTU": "1500",
+                        "IPSettings": "IPv4",
+                        "stack": "Default",
+                        "services": [
+                            "Management"
+                        ],
+                        "Address": {
+                            "__IPv4": "__Can be set to DHCP or a static IPv4 Address",
+                            "__IPv6": "__Not Yet Implemented.",
+                            "IPv4": "10.23.200.21",
+                            "IPv6": null
+                        }
+                    },
+                    "vmk1": {
+                        "portgroup": "vMotion",
+                        "MTU": "1500",
+                        "IPSettings": "IPv4",
+                        "stack": "vMotion",
+                        "services": [
+                            "vMotion",
+                            "Fault Tolerant Logging"
+                        ],
+                        "Address": {
+                            "__IPv4": "__Can be set to DHCP or a static IPv4 Address",
+                            "__IPv6": "__Not Yet Implemented.",
+                            "IPv4": "10.23.201.21",
+                            "IPv6": null
+                        }
+                    },
+                    "vmk2": {
+                        "portgroup": "vSAN",
+                        "MTU": "1500",
+                        "IPSettings": "IPv4",
+                        "stack": "Default",
+                        "services": [
+                            "vSAN"
+                        ],
+                        "Address": {
+                            "__IPv4": "__Can be set to DHCP or a static IPv4 Address",
+                            "__IPv6": "__Not Yet Implemented.",
+                            "IPv4": "10.23.202.21",
+                            "IPv6": null
+                        }
+                    }
+                }
+            },
+            "Pod-200-ESXi-2" : {
+                "cluster" : "Compute",
+                "vmks": {
+                    "vmk0": {
+                        "portgroup": "Management",
+                        "MTU": "1500",
+                        "IPSettings": "IPv4",
+                        "stack": "Default",
+                        "services": [
+                            "Management"
+                        ],
+                        "Address": {
+                            "__IPv4": "__Can be set to DHCP or a static IPv4 Address",
+                            "__IPv6": "__Not Yet Implemented.",
+                            "IPv4": "10.23.200.31",
+                            "IPv6": null
+                        }
+                    },
+                    "vmk1": {
+                        "portgroup": "vMotion",
+                        "MTU": "1500",
+                        "IPSettings": "IPv4",
+                        "stack": "vMotion",
+                        "services": [
+                            "vMotion",
+                            "Fault Tolerant Logging"
+                        ],
+                        "Address": {
+                            "__IPv4": "__Can be set to DHCP or a static IPv4 Address",
+                            "__IPv6": "__Not Yet Implemented.",
+                            "IPv4": "10.23.201.21",
+                            "IPv6": null
+                        }
+                    },
+                    "vmk2": {
+                        "portgroup": "vSAN",
+                        "MTU": "1500",
+                        "IPSettings": "IPv4",
+                        "stack": "Default",
+                        "services": [
+                            "vSAN"
+                        ],
+                        "Address": {
+                            "__IPv4": "__Can be set to DHCP or a static IPv4 Address",
+                            "__IPv6": "__Not Yet Implemented.",
+                            "IPv4": "10.23.202.31",
+                            "IPv6": null
+                        }
+                    }
+                }
+            },
+            "Pod-200-ESXi-3" : {
+                "cluster" : "Edge",
+                "vmks": {
+                    "vmk0": {
+                        "portgroup": "Management",
+                        "MTU": "1500",
+                        "IPSettings": "IPv4",
+                        "stack": "Default",
+                        "services": [
+                            "Management"
+                        ],
+                        "Address": {
+                            "__IPv4": "__Can be set to DHCP or a static IPv4 Address",
+                            "__IPv6": "__Not Yet Implemented.",
+                            "IPv4": "10.23.200.41",
+                            "IPv6": null
+                        }
+                    },
+                    "vmk1": {
+                        "portgroup": "vMotion",
+                        "MTU": "1500",
+                        "IPSettings": "IPv4",
+                        "stack": "vMotion",
+                        "services": [
+                            "vMotion",
+                            "Fault Tolerant Logging"
+                        ],
+                        "Address": {
+                            "__IPv4": "__Can be set to DHCP or a static IPv4 Address",
+                            "__IPv6": "__Not Yet Implemented.",
+                            "IPv4": "10.23.201.41",
+                            "IPv6": null
+                        }
+                    },
+                    "vmk2": {
+                        "portgroup": "vSAN",
+                        "MTU": "1500",
+                        "IPSettings": "IPv4",
+                        "stack": "Default",
+                        "services": [
+                            "vSAN"
+                        ],
+                        "Address": {
+                            "__IPv4": "__Can be set to DHCP or a static IPv4 Address",
+                            "__IPv6": "__Not Yet Implemented.",
+                            "IPv4": "10.23.202.41",
+                            "IPv6": null
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "psc": {
+        "__passwords": "__All passwords use Common.Password",
+        "deploymentSize": "infrastructure",
+        "name": "Pod-200-PSC",
+        "ip": "10.23.200.9",
+        "hostname": "10.23.200.9",
+        "sso": {
+            "domain": "vsphere.local",
+            "site": "Pod200-Site",
+            "replicationPartner": ""
+        },
+        "datacenter": "Pod200-Datacenter",
+        "cluster": "Pod200-Cluster-1"
+    },
+    "vcsa": {
+        "__passwords": "__All passwords use Common.Password",
+        "deploymentSize": "management-small",
+        "name": "Pod-200-VCSA",
+        "ip": "10.23.200.10",
+        "hostname": "10.23.200.10",
+        "sso": {
+            "domain": "vsphere.local",
+            "site": "Pod200-Site",
+            "replicationPartner": ""
+        },
+        "datacenter": "Pod200-Datacenter",
+        "Networking": {
+            "Switches": {
+                "Management_vDS" : {
+                    "__Clusters": "__Defines what vSphere clusters are using this vDS",
+                    "Clusters": [
+                        "Management",
+                        "Compute",
+                        "Edge"
+                    ],
+                    "Config": {
+                        "Version": "6.0.0",
+                        "NumberOfUplinks": 1,
+                        "Mtu": "1600",
+                        "LinkDiscoveryProtocol": {
+                            "Type": "CDP",
+                            "Operation": "Both"
+                        }
+                    },
+                    "PortGroups": {
+                        "Management": {
+                            "Create": true,
+                            "VLAN": {
+                                "__Type": "__Type can be None, VLAN, or VLAN Trunking",
+                                "__ID": "__ID can be null (None), single VLAN # (VLAN), or a Range of VLANs (VLAN Trunking)",
+                                "Type": "VLAN",
+                                "ID": "200"
+                            },
+                            "Security": {
+                                "MACAddressChanges": true,
+                                "ForgedTransmits": true,
+                                "PromiscuousMode": true
+                            },
+                            "Network": {
+                                "Gateway": "10.23.200.1",
+                                "Preix": "24"
+                            }
+                        },
+                        "vMotion": {
+                            "Create": true,
+                            "VLAN": {
+                                "__Type": "__Type can be None, VLAN, or VLAN Trunking",
+                                "__ID": "__ID can be null (None), single VLAN # (VLAN), or a Range of VLANs (VLAN Trunking)",
+                                "Type": "VLAN",
+                                "ID": "201"
+                            },
+                            "Security": {
+                                "MACAddressChanges": true,
+                                "ForgedTransmits": true,
+                                "PromiscuousMode": true
+                            },
+                            "Network": {
+                                "Gateway": "10.23.201.1",
+                                "Preix": "24"
+                            }
+                        },
+                        "vSAN": {
+                            "Create": true,
+                            "VLAN": {
+                                "__Type": "__Type can be None, VLAN, or VLAN Trunking",
+                                "__ID": "__ID can be null (None), single VLAN # (VLAN), or a Range of VLANs (VLAN Trunking)",
+                                "Type": "VLAN",
+                                "ID": "202"
+                            },
+                            "Security": {
+                                "MACAddressChanges": true,
+                                "ForgedTransmits": true,
+                                "PromiscuousMode": true
+                            },
+                            "Network": {
+                                "Gateway": "10.23.202.1",
+                                "Preix": "24"
+                            }
+                        },
+                        "VXLAN": {
+                            "__Create": "__Create determines if the PortGroup is created by the script.  Because NSX creates the PortGroup for the VXLAN transport, this PortGroup is used simply as a placeholder that contains  the various pieces of information needed for NSX to complete that step.  Thus, 'Create' _MUST_ be set to 'false' to ensure it's _NOT_ created by the script.",
+                            "Create": false,
+                            "VLAN": {
+                                "__Type": "__Type can be None, VLAN, or VLAN Trunking",
+                                "__ID": "__ID can be null (None), single VLAN # (VLAN), or a Range of VLANs (VLAN Trunking)",
+                                "Type": "VLAN",
+                                "ID": "203"
+                            },
+                            "Security": {
+                                "MACAddressChanges": true,
+                                "ForgedTransmits": true,
+                                "PromiscuousMode": true
+                            },
+                            "Network": {
+                                "Gateway": "10.23.203.1",
+                                "Preix": "24"
+                            }
+                        },
+                        "ServiceVMs": {
+                            "Create": true,
+                            "VLAN": {
+                                "__Type": "__Type can be None, VLAN, or VLAN Trunking",
+                                "__ID": "__ID can be null (None), single VLAN # (VLAN), or a Range of VLANs (VLAN Trunking)",
+                                "Type": "VLAN",
+                                "ID": "204"
+                            },
+                            "Security": {
+                                "MACAddressChanges": true,
+                                "ForgedTransmits": true,
+                                "PromiscuousMode": true
+                            },
+                            "Network": {
+                                "Gateway": "10.23.204.1",
+                                "Preix": "24"
+                            }
+                        }
+                    }
+                },
+                "Edge_vDS" : {
+                    "__Clusters": "__Defines what vSphere clusters are using this vDS",
+                    "Clusters": [
+                        "Edge"
+                    ],
+                    "Config": {
+                        "Version": "6.0.0",
+                        "NumberOfUplinks": 1,
+                        "Mtu": "1500",
+                        "LinkDiscoveryProtocol": {
+                            "Type": "CDP",
+                            "Operation": "Both"
+                        }
+                    },
+                    "PortGroups": {
+                        "Edge": {
+                            "Create": true,
+                            "VLAN": {
+                                "__Type": "__Type can be None, VLAN, or VLAN Trunking",
+                                "__ID": "__ID can be null (None), single VLAN # (VLAN), or a Range of VLANs (VLAN Trunking)",
+                                "Type": "VLAN",
+                                "ID": "209"
+                            },
+                            "Security": {
+                                "MACAddressChanges": true,
+                                "ForgedTransmits": true,
+                                "PromiscuousMode": true
+                            },
+                            "Network": {
+                                "Gateway": "10.23.209.1",
+                                "Preix": "24"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "nsx": {
+        "Manager": {
+            "__password": "__Uses Common.Password for the admin password",
+            "name": "Pod-200-NSX",
+            "ip": "10.23.200.11",
+            "memory": "12"
+        },
+        "Controller": {
+            "__Password": "__Uses 2 x Common.Password for the password",
+            "PortGroup": "Management",
+            "IPPool": "Controller_Pool",
+            "Quantity": "1"
+        },
+        "HostPrep": {
+            "Clusters": [
+                "Compute",
+                "Edge"
+            ]
+        },
+        "VTEP": {
+            "__Clusters": "__Indicates what clusters to create VTEPs on",
+            "Clusters": [
+                "Compute",
+                "Edge"
+            ],
+            "Switch": "Management_vDS",
+            "__PortGroup": "__VLAN ID is obtained from this PortGroup",
+            "PortGroup": "VXLAN",
+            "MTU": "1600",
+            "UseDHCP": false,
+            "IPPool": "VTEP_Pool",
+            "TeamingPolicy": "FailOver",
+            "Quantity": "1"
+        },
+        "IPPools": {
+            "Controller_Pool": {
+                "__PortGroup": "__Gateway and other settings obtained from PortGroup",
+                "PortGroup": "Management",
+                "StartIp": "10.23.200.12",
+                "EndIp": "10.23.200.14"
+            },
+            "VTEP_Pool": {
+                "__PortGroup": "__Gateway and other settings obtained from PortGroup",
+                "PortGroup": "VXLAN",
+                "StartIp": "10.23.203.20",
+                "EndIp": "10.23.203.99"
+            }
+        },
+        "SegmentID": {
+            "Pool": "5000-5999",
+            "__Multicast": "__Multicast not yet supported.",
+            "Multicast": {
+                "Enabled": false,
+                "Addresses": null
+            }
+        },
+        "TransportZones": {
+            "TZ-Lab": {
+                "Description": "TZ-Lab created by the LabDeploy script",
+                "ReplicationMode": "Unicast",
+                "Clusters":[
+                    "Compute",
+                    "Edge"
+                ]
+            }
+        },
+        "LogicalSwitches": {
+            "LS-Web": {
+                "Description": "LS-Web created by teh LabDeploy script",
+                "TransportZone": "TZ-Lab",
+                "ReplicationMode": "Unicast",
+                "EnableIPDiscovery": true,
+                "EnableMacLearning": false
+            },
+            "LS-App": {
+                "Description": "LS-App created by teh LabDeploy script",
+                "TransportZone": "TZ-Lab",
+                "ReplicationMode": "Unicast",
+                "EnableIPDiscovery": true,
+                "EnableMacLearning": false
+            },
+            "LS-DB": {
+                "Description": "LS-DB created by teh LabDeploy script",
+                "TransportZone": "TZ-Lab",
+                "ReplicationMode": "Unicast",
+                "EnableIPDiscovery": true,
+                "EnableMacLearning": false
+            }
+        }
+    }
+}
