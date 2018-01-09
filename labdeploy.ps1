@@ -346,10 +346,10 @@ Function Assign-SoftwareLicense {
 
 	# Decoded License EditionKey value Hash Table
 	$EditionKeyTable = @{
-		"vCenter" = "vc"	# vc.standard.instance
-		"vSphere" = "esx"	# esx.enterprisePlus.cpuPackage
-		"vSAN"    = "vsan"	# vsan.enterprise2
-		"NSXv"	  = "nsx"	# nsx.vsphere.vm
+		"vCenter" = "vc"			# vc.standard.instance
+		"vSphere" = "esx"			# esx.enterprisePlus.cpuPackage
+		"vSAN"    = "vsan"			# vsan.enterprise2
+		"NSXv"	  = "nsx.vsphere"	# Ensure that only nsx.vsphere licenses get installed, not nsx.vshield licenses
 	}
 
 	# Depending on the platform, perform the appropriate license install procedure
@@ -374,8 +374,8 @@ Function Assign-SoftwareLicense {
 							Continue
 						}
 
-						# If License has no available licenses left, then continue to next License
-						If (($License.Total - $License.Used) -eq 0) {
+						# If not an unlimited License and License has no available licenses left, then continue to next License
+						If ((-not $License.Total -eq 0) -and ($License.Total - $License.Used) -eq 0) {
 							Continue
 						}
 
