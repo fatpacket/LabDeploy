@@ -1,0 +1,469 @@
+{
+    "__ForBrant-1": "Items preceeded by dashes (-) are to be removed",
+    "__ForBrant-2": "Items preceeded by pluses (+++) are new items that are to be added.  Pluses at the top-most level indicate all child objects are new, too.",
+    "__ForBrant-3": "Greater than signs (>>>>) direct you towards comments, questions, thoughts.  Some are very important.  Important to read to end of the line."
+    "__version": "0.1",
+    "__comments": "Configuration for deploy.ps1 - www.fatpacket.net/blog",
+    "pod": "204",
+    "target": { >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> What do you think about changing this to "Physical", or "Outter"?
+        "server": "vcenter01.fatpacket.home",
+        "user": "administrator@vsphere.local",
+        "password": "VMware1!",
+        "datacenter": "Lab",
+        "cluster": "Workload",
+        "datastore": "vsanDatastore",
+        "folder": "Nested Labs/Pod204",
+        "portgroup": "204-Pod-204-Nested",  >>>>>>>>>>>>>>>>>>>> Because of the multiple nested PortGroups, each with their own VLAN ID, this portgorup will need to support Group Tagging.
+        "---------------network": {  >>>>>>>>>>>>>>>>> Networking info should be in the specific esxi, vcsa, psc sections...other items (DNS, NTP, etc.) taken from "Common"
+            "--------------------------------------------------netmask": "255.255.255.0",
+            "--------------------------------------------------gateway": "192.168.204.1",
+            "--------------------------------------------------prefix": "24",
+            "--------------------------------------------------dns": "192.168.1.1",
+            "--------------------------------------------------domain": "fatpacket.home",
+            "--------------------------------------------------ntp": "10.23.0.1"
+        ----------------------}
+    },
+    "+++Common": { ---------------------------------Replaces "General" section
+        "password": "VMware1!",
+        "syslog": "10.23.100.26",
+        "ssh": true,
+        "log": "Pod-204-Deploy.log",   >>>>>>>>>>>> Is this even being used?  I found zero hits on a search.
+        "+++dns": "10.23.100.254",
+        "+++domain": "fatpacket.home",
+        "+++ntp": "10.23.0.1"
+    },
+    "Software": {
+        "VCSA": {
+            "Vendor":  "VMware",
+            "Product": "vCenter",
+            "Version": "6.50U1C",
+            "MatchVersionUsingRegEx": false,
+            "Patch":   false
+        },
+        "ESXi": {
+            "Vendor":  "VMware",
+            "Product": "ESXi",
+            "Version": "6.50U1",
+            "MatchVersionUsingRegEx": false,
+            "Patch":   false
+        },
+        "NSXv": {
+            "Vendor":  "VMware",
+            "Product": "NSX-v",
+            "Version": "6.3.5",
+            "MatchVersionUsingRegEx": false,
+            "Patch":   false
+        },
+        "vRA": {
+            "Vendor":  "VMware",
+            "Product": "vRA",
+            "Version": "7.3.0",
+            "MatchVersionUsingRegEx": false,
+            "Patch":   false
+        }
+    },
+    "esxi": {
+        "+++hardware": { >>>>>>>>>>>>>>>>>>>>> "IMPORTANT COMMENT": I'm using each cluster as a key here.  Gives us a lot of flexibility.  But, this means we'll need to read the JSON file in and convert it to a Hash Table.  If we want to keep it as a PSObject (this is the type when the file is read in from JSON), then I'll need to change some sections.  This is a dicussion point.   Could do the same conversion for Hosts, but haven't yet.  Big change is changing the loops to use Keys, but, this allows us to lookup things without having to iterate through them.
+            "Management": { >>>>>>>>>>>>>>>>>> Defines HW config of nested ESXi hosts in a given cluster
+                "cpu": "5",
+                "coresPerSocket": "5",
+                "ram": "20",
+                "cacheDisk": "100",
+                "capacityDisk": "200",
+                "createVMFS": false
+            },
+            "Compute": {
+                "cpu": "4",
+                "coresPerSocket": "4",
+                "ram": "16",
+                "cacheDisk": "100",
+                "capacityDisk": "200",
+                "createVMFS": false
+            },
+            "Edge": {
+                "cpu": "4",
+                "coresPerSocket": "4",
+                "ram": "16",
+                "cacheDisk": "50",
+                "capacityDisk": "100",
+                "createVMFS": false
+            }
+        },
+        "hosts": [  >>>>>>>>>>>>>>>>> I'd like to change over to Names being key.  See "IMPORTANT COMMENT" above.
+            {
+                "name": "Pod-204-ESXi-1",
+                "--------------------------------------------------------ip": "192.168.204.20",
+                "+++cluster" : "Management",
+                "+++vmks": [     >>>>>>>>>>>>>>>>>>>>>>>>> I'd like to make Name (vmk0, 1, etc.) keys.  See "IMPORTANT COMMENT" above.
+                    {
+                        "name": "vmk0",
+                        "portgroup": "Management",
+                        "IPSettings": "IPv4",
+                        "stack": "Default",
+                        "services": [
+                            "Management"
+                        ],
+                        "Address": {
+                            "IPv4": "10.23.200.21",
+                            "IPv6": null
+                        }
+                    },
+                    {
+                        "name": "vmk1",
+                        "portgroup": "vMotion",
+                        "IPSettings": "IPv4",
+                        "stack": "vMotion",
+                        "services": [
+                            "vMotion",
+                            "Fault Tolerant Logging"
+                        ],
+                        "Address": {
+                            "IPv4": "DHCP",  >>>>>>>>>>>>>>>>>>>>>>>>>> Can be set to either IP Address or DHCP
+                            "IPv6": null
+                        }
+                    },
+                    {
+                        "name": "vmk2",
+                        "portgroup": "vSAN",
+                        "IPSettings": "IPv4",
+                        "stack": "Default",
+                        "services": [
+                            "vSAN"
+                        ],
+                        "Address": {
+                            "IPv4": "10.23.202.21",
+                            "IPv6": null
+                        }
+                    }
+                ]
+            },
+            {
+                "name": "Pod-204-ESXi-2",
+                "---------------------------------------------------------ip": "192.168.204.21",
+                "+++cluster" : "Compute",
+                "+++vmk": [     >>>>>>>>>>>>>>>>>>>>>>>>> I'd like to make Name (vmk0, 1, etc.) keys.  See "IMPORTANT COMMENT" above.
+                    {
+                        "name": "vmk0",
+                        "portgroup": "Management",
+                        "IPSettings": "IPv4",
+                        "stack": "Default",
+                        "services": [
+                            "Management"
+                        ],
+                        "Address": {
+                            "IPv4": "10.23.200.31",
+                            "IPv6": null
+                        }
+                    },
+                    {
+                        "name": "vmk1",
+                        "portgroup": "vMotion",
+                        "IPSettings": "IPv4",
+                        "stack": "vMotion",
+                        "services": [
+                            "vMotion",
+                            "Fault Tolerant Logging"
+                        ],
+                        "Address": {
+                            "IPv4": "DHCP",  >>>>>>>>>>>>>>>>>>>>>>>>>> Can be set to either IP Address or DHCP
+                            "IPv6": null
+                        }
+                    },
+                    {
+                        "name": "vmk2",
+                        "portgroup": "vSAN",
+                        "IPSettings": "IPv4",
+                        "stack": "Default",
+                        "services": [
+                            "vSAN"
+                        ],
+                        "Address": {
+                            "IPv4": "10.23.202.31",
+                            "IPv6": null
+                        }
+                    }
+                ]
+            },
+            {
+                "name": "Pod-204-ESXi-3",
+                "--------------------------------------------------------ip": "192.168.204.22",
+                "+++cluster" : "Edge",
+                "+++vmk": [     >>>>>>>>>>>>>>>>>>>>>>>>> I'd like to make Name (vmk0, 1, etc.) keys.  See "IMPORTANT COMMENT" above.
+                    {
+                        "name": "vmk0",
+                        "portgroup": "Management",
+                        "MTU": 1500,
+                        "IPSettings": "IPv4",
+                        "stack": "Default",
+                        "services": [
+                            "Management"
+                        ],
+                        "Address": {
+                            "IPv4": "10.23.200.41",
+                            "IPv6": null
+                        }
+                    },
+                    {
+                        "name": "vmk1",
+                        "portgroup": "vMotion",
+                        "MTU": 1500,
+                        "IPSettings": "IPv4",
+                        "stack": "vMotion",
+                        "services": [
+                            "vMotion",
+                            "Fault Tolerant Logging"
+                        ],
+                        "Address": {
+                            "IPv4": "DHCP",  >>>>>>>>>>>>>>>>>>>>>>>>>> Can be set to either IP Address or DHCP
+                            "IPv6": null
+                        }
+                    },
+                    {
+                        "name": "vmk2",
+                        "portgroup": "vSAN",
+                        "MTU": 1500,
+                        "IPSettings": "IPv4",
+                        "stack": "Default",
+                        "services": [
+                            "vSAN"
+                        ],
+                        "Address": {
+                            "IPv4": "10.23.202.41",
+                            "IPv6": null
+                        }
+                    }
+                ]
+            }
+        ],
+        "--------------------------------------------------------cpu": "5",
+        "--------------------------------------------------------coresPerSocket": "5",
+        "--------------------------------------------------------ram": "16",
+        "--------------------------------------------------------cacheDisk": "100",
+        "--------------------------------------------------------capacityDisk": "200",
+        "--------------------------------------------------------createVMFS": false
+    },
+    "psc": {
+        "deploymentSize": "infrastructure",
+        "name": "Pod-204-PSC",
+        "ip": "10.23.200.9",
+        "hostname": "10.23.200.9",
+        "rootPassword": "VMware1!",  >>>>>>>>>>>>>>>>>> Use "Common.Password" here?
+        "sso": {
+            "domain": "vsphere.local",
+            "site": "Pod204-Site",
+            "password": "VMware1!",  >>>>>>>>>>>>>>>>>> Use "Common.Password" here?
+            "replicationPartner": ""
+        },
+        "datacenter": "Pod204-Datacenter",
+        "cluster": "Pod204-Cluster-1",
+        "-----------------------------------------------------distributedSwitch": "Pod-204-VDS",
+        "-----------------------------------------------------portgroup": "VLAN204"
+    },
+    "vcsa": {
+        "deploymentSize": "management-small",
+        "name": "Pod-204-VCSA",
+        "ip": "10.23.200.10",
+        "hostname": "10.23.200.10",
+        "rootPassword": "VMware1!",  >>>>>>>>>>>>>>>>>> Use "Common.Password" here?
+        "sso": {
+            "domain": "vsphere.local",
+            "site": "Pod204-Site",
+            "password": "VMware1!",  >>>>>>>>>>>>>>>>>> Use "Common.Password" here?
+            "replicationPartner": ""
+        },
+        "datacenter": "Pod204-Datacenter",
+        "---------------------------------------------------------cluster": "Pod204-Cluster-1",
+        "+++Clusters": {
+            "Management": {
+                "DRS": {   >>>>>>>>>>>>>>>>>>>>>>>>>>>> This creates placeholders for future DRS, HA, etc. settings we might want to add
+                    "Enabled": true
+                },
+                "HA": {
+                    "Enabled": true
+                },
+                "vSAN": {
+                    "Enabled": true
+                },
+                "EVC": {
+                    "Enabled": false
+                }
+            },
+            "Compute": {
+                "DRS": {
+                    "Enabled": true
+                },
+                "HA": {
+                    "Enabled": true
+                },
+                "vSAN": {
+                    "Enabled": true
+                },
+                "EVC": {
+                    "Enabled": false
+                }
+            },
+            "Edge": {
+                "DRS": {
+                    "Enabled": true
+                },
+                "HA": {
+                    "Enabled": true
+                },
+                "vSAN": {
+                    "Enabled": true
+                },
+                "EVC": {
+                    "Enabled": false
+                }
+            }
+        }
+
+        "----------------------distributedSwitch": "Pod-204-VDS",
+        "----------------------portgroup": "VLAN204",
+        "+++Networking": { >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> I put Networking under VCSA because that's where it's created.  We can move it higher-up if you want.  Thoughts?
+            "Switches": {
+                "Management_vDS" : {
+                    "Config": {
+                        "Version": "6.0.0",
+                        "NumberOfUplinks": 1,
+                        "Mtu": 1600,
+                        "LinkDiscoveryProtocol": {
+                            "Type": "CDP",
+                            "Operation": "Both"
+                        }
+                    },
+                    "PortGroups": {
+                        "Management": {
+                            "Create": true,
+                            "VLAN": {
+                                "Type": "VLAN", >>>>>>>>>>>>>>> Could also be None or VLAN Trunking
+                                "ID": 200       >>>>>>>>>>>>>>> ...If Trunk, then value is a range of VLAN IDs (String)
+                            },
+                            "Security": {
+                                "MACAddressChanges": true,
+                                "ForgedTransmits": true,
+                                "PromiscuousMode": true
+                            },
+                            "Network": {
+                                "Gateway": "10.23.200.1",
+                                "Preix": "24"
+                            }
+                        },
+                        "vMotion": {
+                            "Create": true,
+                            "VLAN": {
+                                "Type": "VLAN", >>>>>>>>>>>>>>> Could also be None or VLAN Trunking
+                                "ID": 201       >>>>>>>>>>>>>>> ...If Trunk, then value is a range of VLAN IDs (String)
+                            },
+                            "Security": {
+                                "MACAddressChanges": true,
+                                "ForgedTransmits": true,
+                                "PromiscuousMode": true
+                            },
+                            "Network": {
+                                "Gateway": "10.23.201.1",
+                                "Preix": "24"
+                            }
+                        },
+                        "vSAN": {
+                            "Create": true,
+                            "VLAN": {
+                                "Type": "VLAN", >>>>>>>>>>>>>>> Could also be None or VLAN Trunking
+                                "ID": 202       >>>>>>>>>>>>>>> ...If Trunk, then value is a range of VLAN IDs (String)
+                            },
+                            "Security": {
+                                "MACAddressChanges": true,
+                                "ForgedTransmits": true,
+                                "PromiscuousMode": true
+                            },
+                            "Network": {
+                                "Gateway": "10.23.202.1",
+                                "Preix": "24"
+                            }
+                        },
+                        "VXLAN": { >>>>>>>>>>>>>>>>>>>>>>>>>>>> NOT CREATED....used by VXLAN Configuration and VTEP IP Pool creation.  Allows for centralized place to place info, instead of multiple places, making it easier to maintain and update.
+                            "Create": false,
+                            "VLAN": {
+                                "Type": "VLAN", >>>>>>>>>>>>>>> Could also be None or VLAN Trunking
+                                "ID": 203       >>>>>>>>>>>>>>> ...If Trunk, then value is a range of VLAN IDs (String)
+                            },
+                            "Security": {
+                                "MACAddressChanges": true,
+                                "ForgedTransmits": true,
+                                "PromiscuousMode": true
+                            },
+                            "Network": {
+                                "Gateway": "10.23.203.1",
+                                "Preix": "24"
+                            }
+                        },
+                        "ServiceVMs": {
+                            "Create": true,
+                            "VLAN": {
+                                "Type": "VLAN", >>>>>>>>>>>>>>> Could also be None or VLAN Trunking
+                                "ID": 204       >>>>>>>>>>>>>>> ...If Trunk, then value is a range of VLAN IDs (String)
+                            },
+                            "Security": {
+                                "MACAddressChanges": true,
+                                "ForgedTransmits": true,
+                                "PromiscuousMode": true
+                            },
+                            "Network": {
+                                "Gateway": "10.23.204.1",
+                                "Preix": "24"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "-------------------------------------------------------------general": { >>>>> Moved Up And Renamed To Common
+        "-----------------------------password": "VMware1!",
+        "-----------------------------syslog": "192.168.1.26",
+        "-----------------------------ssh": true,
+        "-----------------------------log": "pod-204-deploy.log"
+    },
+    "nsx": {
+        "+++manager": {
+            "name": "Pod-204-NSX",
+            "ip": "10.23.200.11",
+            "password": "VMware1!",  >>>>>>>>>>>>>>>>>> Use "Common.Password" here?
+            "memory": "12"
+        },
+        "controller": {
+            "+++PortGroup": "Management",
+            "+++IPPool": "Controller_Pool",
+            "-------------------------------------startIp": "192.168.204.12",
+            "-------------------------------------endIp": "192.168.204.14",
+            "password": "VMware1!VMware1!"  >>>>>>>>>>>>>>>>>> Use _2_ x "Common.Password" here?
+        },
+        "VTEP": {
+            "+++Clusters": [   >>>>>>>>>>>>> Indicates what clusters to create VTEPs on (i.e. Configure VXLAN Networking)
+                "Compute"
+                "Edge"
+            ],
+            "+++Switch": "Management_vDS",
+            "+++PortGroup": "VXLAN", >>>>>>>>>>>>>> Used to get VLAN ID (To Reduce Chance Of Error)
+            "+++MTU": 1600,
+            "+++UseDHCP": false,
+            "+++IPPool": "VTEP_Pool",
+            "+++TeamingPolicy": "FailOver",  >>>>>>> We could automate the selection of this as the script currently does
+            "+++Quantity": 1,
+            "-----------------------------------startIp": "192.168.204.30",
+            "-----------------------------------endIp": "192.168.204.39"
+        },
+        "IPPools": {
+            "Controller_Pool": {
+                "PortGroup": "Management",  >>>>>>>>>>>>>>> This used to obtain the Gateway, Prefix Length for IP Pool
+                "StartIp": "10.23.200.12",
+                "EndIp": "10.23.200.14"
+        },
+            "VTEP_Pool": {
+                "PortGroup": "VXLAN", >>>>>>>>>>>>>>>>>>>>> This used to obtain the Gateway, Prefix Length for IP Pool
+                "StartIp": "10.23.203.20",
+                "EndIp": "10.23.203.99"
+            }
+        }
+    }
+}
