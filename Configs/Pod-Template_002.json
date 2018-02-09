@@ -423,6 +423,7 @@
         },
         "Controller": {
             "__Password": "__Uses 2 x Common.Password for the password",
+            "BaseName": "Controller-",
             "PortGroup": "Management",
             "IPPool": "Controller_Pool",
             "Quantity": "1"
