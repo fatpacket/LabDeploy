@@ -104,7 +104,7 @@ function Close-VCSAConnection {
 		$existingConnection =  $global:DefaultVIServers | where-object -Property Name -eq -Value $vcsaName
         if($existingConnection -ne $null) {
             Write-Log -Message "Disconnecting from $($vcsaName)"
-			Disconnect-VIServer -Server $existingConnection -Confirm:$false;
+			Disconnect-VIServer -Server $existingConnection -Confirm:$false
         } else {
             Write-Log -Message "Could not find an existing connection named $($vcsaName)" -Warning
         }
@@ -183,6 +183,126 @@ param (
 ###################################################################################################################
 ##                                       Script Specific Functions                                               ##
 ###################################################################################################################
+
+
+Function Configure-ESXiHost {
+	<#
+    .NOTES
+        ===========================================================================
+        Created by:    Luis Chanu
+        Organization:  On Site Network Solutions, Inc.
+        Twitter:       @LuisChanu
+        ===========================================================================
+    .DESCRIPTION
+		This function contains the "standard" configuration changes which an ESXi hosts should have.  It provides
+		a central location to place ESXi specific changes, which can then be called immediately following the
+		provisioning of the given ESXi host, before it is added to vCenter.  These configuration settings are
+		applied dirctly to the ESXi host, and not via vCenter.
+
+		This function connects to the host, applies common ESXi Host configurations, then disconnects from
+		the specific host.  Thus, it's cleans up the VIConnections, without disturbing any existing vCenter
+		connections that may exist.
+
+		Return Values:
+			$false	If unable to connect to ESXi Host
+	.PARAMETER ESXiHost
+        The name of the ESXi Host having it's configuration modified.
+    .PARAMETER User
+        The user credential (i.e. root) that is used to authenticate to the host
+    .PARAMETER Password
+        The password that is used to authenticate the user to the ESXi host.
+    .EXAMPLE
+        Configure-ESXiHost -ESXiHost 10.23.240.21 -User root -Password VMware1!
+    .EXAMPLE
+        Configure-ESXiHost -ESXiHost Pod240-Esxi-01 -User root -Password VMware1!
+	#>
+	param(
+		[Parameter(ValueFromPipeline)]
+		[String[]]$ESXiHost,
+        [Parameter(Mandatory=$true)][String]$User,
+        [Parameter(Mandatory=$true)][String]$Password
+    )
+
+	##
+	## Verify reachability to ESXi host before changes are made
+	##
+	Write-Log "Checking reachability to $($ESXiHost)"
+
+	# Create URL used to verify server is reachable
+	$URL = "HTTPS://$($ESXiHost)"
+
+	# Continuously try to connect to ESXi host until successful
+	do {
+		try
+		{
+			$Result = Invoke-WebRequest -URI $URL -TimeoutSec 1 -ErrorAction Stop
+		}
+		catch
+		{
+			# Wait a bit until we try again
+			Start-Sleep -Seconds 1
+		}
+	} until ($Result.StatusCode -eq 200)
+
+	# We see the server, so log that
+	Write-Log "Verified reachability to $($ESXiHost)"
+
+	# Connect to ESXi Host directly
+	$ConnectedHost = Connect-VIServer -Server $ESXiHost -User $User -Password $Password -NotDefault -WarningAction SilentlyContinue
+
+	# If unable to establish a connection with ESXi host, return $false
+	if ($ConnectedHost -eq $null)
+	{
+		Write-Log "Unable to establish a direct connection with ESXi Host $($ESXiHost)." -Warning
+		return $false
+	}
+
+	# Obtain VMHost object of connected ESXi server
+	$VMHost = Get-VMHost -Server $ConnectedHost
+
+	##
+	## "Standard" configuration changes listed below
+	##
+
+	# Indicate what we're about to do
+	Write-Log "Configuring ESXi Host $($VMHost.Name)"
+
+	################################# Configure NTP ######################################
+
+	# Configure NTP Server (Slightly redundant, as already configured in OVF import, but including for completeness)
+	$NTPServers = Get-VMHostNtpServer -VMHost $VMHost
+
+	# If the NTP Server does not already exist on the ESXi Host
+	if (-Not ($NTPServers -like $podConfig.target.network.ntp)) {
+		# Configure NTP Server on ESXi Host
+		Write-Log " --> NTP: Adding NTP Server $($podConfig.target.network.ntp)"
+		Add-VMHostNtpServer -VMHost $VMHost -NTPServer $podConfig.target.network.ntp | Out-File -Append -LiteralPath $verboseLogFile
+	}
+
+	# Configure firewall to permit NTP Client traffic outbound
+	Write-Log " --> NTP: Updating firewall to permit NTP client traffic outbound"
+	Get-VMHostFirewallException -VMHost $VMHost | Where-Object {$_.Name -eq "NTP client"} | Set-VMHostFirewallException -Enabled:$true | Out-File -Append -LiteralPath $verboseLogFile
+
+	# Configure NTP Service to start and stop with host
+	Write-Log " --> NTP: Configuring NTP Service Startup Policy to 'Start and stop with host'"
+	Get-VmHostService -VMHost $VMHost | Where-Object {$_.key -eq "ntpd"} | Set-VMHostService -policy "on" | Out-File -Append -LiteralPath $verboseLogFile
+
+	# Start NTP Service
+	Write-Log " --> NTP: Starting NTP Service"
+	Get-VmHostService -VMHost $VMHost | Where-Object {$_.key -eq "ntpd"} | Start-VMHostService | Out-File -Append -LiteralPath $verboseLogFile
+
+
+	##
+	## End Of Standard Configuration Changes To Make
+	##
+
+	# Disconnect from ESXi Host
+	Disconnect-VIServer -Server $ConnectedHost -Force:$true -Confirm:$false
+
+	# Completed, so return
+	return
+}
+
 
 Function Install-SoftwareLicense {
 	<#
@@ -1096,6 +1216,26 @@ if($deployESXi) {
 	}
 	Close-VCSAConnection -vcsaName $podConfig.target.server
 	# Write-Log "#### Nested ESXi VMs Deployed ####"
+
+
+	# William Lam's ESXi OVA runs a configuration script when it's first powered on.  Near the end
+	# of this script, it restarts the management interface, which will cause a failure if the script
+	# connected to the server before the script completes.  For that reason, and additional delay is
+	# introduced here to permit the script to complete.
+
+	# Start with a minimum of 90 seconds
+	$AdditionalDelay = 90
+
+	# And add 10 seconds for each additional host
+	$podConfig.esxi.hosts | ForEach-Object { $AdditionalDelay += 10 }
+
+	Write-Log "Introducing $($AdditionalDelay) seconds delay to ensure all ESXi hosts come on-line..."
+	Start-Sleep -Seconds $AdditionalDelay
+
+	# Now that all nested ESXi hosts are provisioned and hopefully on-line, apply common ESXi host configuration to each host
+	$podConfig.esxi.hosts | ForEach-Object {
+		Configure-ESXiHost -ESXiHost $_.ip -User root -Password $podConfig.general.password
+	}
 }
 
 
