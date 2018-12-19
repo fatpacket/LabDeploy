@@ -39,6 +39,12 @@
                     "Name":         "vCenter Server v6.70 D",
                     "Directory":    "E:\\Software\\VMware\\vCenter\\v6.7.0D",
                     "File":         null
+                },
+                {
+                    "Version":      "6.70U1",
+                    "Name":         "vCenter Server v6.70 Update 1",
+                    "Directory":    "E:\\Software\\VMware\\vCenter\\v6.7.0U1",
+                    "File":         null
                 }
             ],
             "Patches": [
@@ -266,7 +272,7 @@
                     "Version":      "6.3.3",
                     "Name":         "NSX for vSphere v6.3.3",
                     "Directory":    "E:\\Software\\VMware\\NSX-v\\v6.3.3",
-                    "File":         "VMware-NSX-Manager-6.3.3-7087283.ova.ova"
+                    "File":         "VMware-NSX-Manager-6.3.3-7087283.ova"
                 },
                 {
                     "Version":      "6.3.4",
@@ -281,6 +287,12 @@
                     "File":         "VMware-NSX-Manager-6.3.5-7119875.ova"
                 },
                 {
+                    "Version":      "6.3.6",
+                    "Name":         "NSX for vSphere v6.3.6",
+                    "Directory":    "E:\\Software\\VMware\\NSX-v\\v6.3.6",
+                    "File":         "VMware-NSX-Manager-6.3.6-8085122.ova"
+                },
+                {
                     "Version":      "6.4.0",
                     "Name":         "NSX for vSphere v6.4.0",
                     "Directory":    "E:\\Software\\VMware\\NSX-v\\v6.4.0",
@@ -291,6 +303,12 @@
                     "Name":         "NSX for vSphere v6.4.3",
                     "Directory":    "E:\\Software\\VMware\\NSX-v\\v6.4.3",
                     "File":         "VMware-NSX-Manager-6.4.3-9927516.ova"
+                },
+                {
+                    "Version":      "6.4.4",
+                    "Name":         "NSX for vSphere v6.4.4",
+                    "Directory":    "E:\\Software\\VMware\\NSX-v\\v6.4.4",
+                    "File":         "VMware-NSX-Manager-6.4.4-11197766.ova"
                 }
             ],
             "Patches": [
