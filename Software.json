@@ -99,6 +99,12 @@
                     "Name":         "ESXi v6.70",
                     "Directory":    "E:\\Software\\VMware\\ESXi\\NestedVirtualAppliances\\v6.7.0",
                     "File":         "Nested_ESXi6.7_Appliance_Template_v1.ova"
+                },
+                {
+                    "Version":      "6.70U1",
+                    "Name":         "ESXi v6.70 Update 1",
+                    "Directory":    "E:\\Software\\VMware\\ESXi\\NestedVirtualAppliances\\v6.7.0U1",
+                    "File":         "Nested_ESXi6.7u1_Appliance_Template_v1.ova"
                 }
             ],
             "Patches": [
