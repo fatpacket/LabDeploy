@@ -770,7 +770,7 @@ function Get-SoftwarePath {
 
     # Verify Software File exists
     If (Test-Path -Path $File -PathType Leaf) {
-        Write-Log "Using $File as software repsotory configuration file for $Vendor $Product"
+        Write-Log "Using $File as software repository configuration file for $Vendor $Product"
     }
     else {
         Write-Log "Unable to locate Software Repository configuration file $File... Exiting." -Warning
