@@ -315,6 +315,12 @@
                     "Name":         "NSX for vSphere v6.4.4",
                     "Directory":    "E:\\Software\\VMware\\NSX-v\\v6.4.4",
                     "File":         "VMware-NSX-Manager-6.4.4-11197766.ova"
+                },
+                {
+                    "Version":      "6.4.5",
+                    "Name":         "NSX for vSphere v6.4.5",
+                    "Directory":    "E:\\Software\\VMware\\NSX-v\\v6.4.5",
+                    "File":         "VMware-NSX-Manager-6.4.5-13282012.ova"
                 }
             ],
             "Patches": [
@@ -333,6 +339,18 @@
                     "Name":         "NSX Transformers v2.3.0",
                     "Directory":    "E:\\Software\\VMware\\NSX-T\\v2.3.0",
                     "File":         "nsx-unified-appliance-2.3.0.0.0.10085405.ova"
+                },
+                {
+                    "Version":      "2.3.1",
+                    "Name":         "NSX Transformers v2.3.1",
+                    "Directory":    "E:\\Software\\VMware\\NSX-T\\v2.3.1",
+                    "File":         "nsx-unified-appliance-2.3.1.0.0.11294305.ova"
+                },
+                {
+                    "Version":      "2.4.0",
+                    "Name":         "NSX Transformers v2.4.0",
+                    "Directory":    "E:\\Software\\VMware\\NSX-T\\v2.4.0",
+                    "File":         "nsx-unified-appliance-2.4.0.0.0.12456291.ova"
                 }
             ],
             "Patches": [
